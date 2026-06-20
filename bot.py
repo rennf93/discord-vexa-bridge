@@ -8,6 +8,10 @@ into the same Postgres tables the Vexa bots use:
 The gateway merges Postgres + Redis on read, so Discord calls appear in the
 dashboard / MCP / Claude exactly like Meet and Zoom.
 
+Voice receive uses py-cord's native DAVE-capable receiver (py-cord >= 2.8 decrypts
+Discord's mandatory E2EE/DAVE voice automatically): `channel.connect()` does the
+gateway + MLS handshake, and `start_recording(sink)` delivers decoded per-user PCM.
+
 Slash commands: /join (joins your current voice channel), /leave.
 Utterances are delimited by silence: Discord only sends voice packets while a user
 is transmitting, so a gap with no packets ends an utterance.
@@ -26,8 +30,7 @@ from collections import defaultdict
 import aiohttp
 import asyncpg
 import discord
-from dave_voice.discord_protocol import DAVEVoiceProtocol
-from dave_voice.voice_client import DAVEVoiceClient
+from discord.sinks import Sink
 
 TOKEN          = os.environ["DISCORD_TOKEN"]
 DATABASE_URL   = os.environ["DATABASE_URL"]           # postgresql://postgres:pw@postgres:5432/vexa
@@ -66,21 +69,22 @@ async def ensure_pool() -> asyncpg.Pool:
     return pool
 
 
-class PcmBuffer:
-    """Accumulates per-user PCM emitted by DAVEVoiceClient; silence-gap segmented."""
+class LiveSink(Sink):
+    """Receives decoded PCM per user on py-cord's voice-recv thread; silence-segmented."""
 
     def __init__(self):
+        super().__init__()
         self.lock = threading.Lock()
         self.buf: dict[int, bytearray] = defaultdict(bytearray)
         self.last: dict[int, float] = {}
         self.start: dict[int, float] = {}
 
-    def write(self, user: int, data: bytes):
+    def write(self, data, user):  # called from py-cord's non-async audio thread
         now = time.monotonic()
         with self.lock:
             if not self.buf[user]:
                 self.start[user] = now
-            self.buf[user].extend(data)
+            self.buf[user].extend(bytes(data))
             self.last[user] = now
 
     def _pop(self, only_silent: bool, silence_s: float = 0.0):
@@ -127,7 +131,7 @@ class Meeting:
         return name
 
 
-# active: guild_id -> (voice_protocol, client, sink, meeting, flusher_task)
+# active: guild_id -> (voice_client, sink, meeting, flusher_task)
 active: dict[int, tuple] = {}
 
 
@@ -187,7 +191,7 @@ async def flusher(guild_id: int):
             entry = active.get(guild_id)
             if not entry:
                 return
-            _, _, sink, meeting, _ = entry
+            _, sink, meeting, _ = entry
             for uid, pcm, t0, t1 in sink.drain_ready(SILENCE_MS / 1000):
                 asyncio.create_task(store(meeting, uid, pcm, t0, t1))
     except asyncio.CancelledError:
@@ -206,21 +210,15 @@ async def join(ctx: discord.ApplicationContext):
     channel = ctx.author.voice.channel
     await ctx.defer()
 
-    # Register a VoiceProtocol so py-cord routes VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE
-    # to it (it does NOT dispatch them as client events). This sends gateway op 4 and
-    # captures token/endpoint/session_id; DAVEVoiceClient then owns the voice WS/UDP.
+    # py-cord's native voice client does the gateway + MLS/DAVE handshake and
+    # decrypts E2EE voice automatically (py-cord >= 2.8).
     try:
-        vc: DAVEVoiceProtocol = await channel.connect(cls=DAVEVoiceProtocol, timeout=20)
+        vc = await channel.connect(timeout=20)
     except asyncio.TimeoutError:
         await ctx.respond("Timed out connecting to voice. Try again.", ephemeral=True)
         return
     except discord.ClientException:
         await ctx.respond("Already connected to voice in this server.", ephemeral=True)
-        return
-
-    if not (vc.token and vc.endpoint and vc.session_id):
-        await vc.disconnect(force=True)
-        await ctx.respond("Didn't receive full voice credentials; try again.", ephemeral=True)
         return
 
     t0 = time.monotonic()
@@ -239,26 +237,10 @@ async def join(ctx: discord.ApplicationContext):
         )
 
     meeting = Meeting(ctx.guild, channel, meeting_id, session_uid, t0)
-    sink = PcmBuffer()
-
-    client = DAVEVoiceClient(
-        server_id=ctx.guild.id, channel_id=channel.id, user_id=bot.user.id,
-        session_id=vc.session_id, token=vc.token, endpoint=vc.endpoint,
-        on_pcm=lambda uid, pcm: sink.write(uid, pcm),
-    )
-    try:
-        await client.start()
-    except Exception as e:
-        await vc.disconnect(force=True)
-        async with (await ensure_pool()).acquire() as c:
-            await c.execute(
-                "UPDATE meetings SET status='failed', end_time=now(), updated_at=now() WHERE id=$1",
-                meeting_id,
-            )
-        await ctx.respond(f"Failed to start voice receive: {e}", ephemeral=True)
-        return
+    sink = LiveSink()
+    vc.start_recording(sink)  # live capture via sink.write; per-user decoded PCM
     task = asyncio.create_task(flusher(ctx.guild.id))
-    active[ctx.guild.id] = (vc, client, sink, meeting, task)
+    active[ctx.guild.id] = (vc, sink, meeting, task)
     await ctx.respond(f"Recording **{channel.name}** → meeting `{meeting_id}`. Speakers tagged by name.")
 
 
@@ -268,11 +250,14 @@ async def leave(ctx: discord.ApplicationContext):
     if not entry:
         await ctx.respond("Not recording here.", ephemeral=True)
         return
-    vc, client, sink, meeting, task = entry
+    vc, sink, meeting, task = entry
     task.cancel()
     await ctx.defer()
-    await client.stop()
-    await vc.disconnect(force=True)  # change_voice_state(None) + cleanup
+    try:
+        vc.stop_recording()
+    except Exception:
+        pass
+    await vc.disconnect(force=True)
     for uid, pcm, t0, t1 in sink.drain_all():
         await store(meeting, uid, pcm, t0, t1)
     async with (await ensure_pool()).acquire() as c:
