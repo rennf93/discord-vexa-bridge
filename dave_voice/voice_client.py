@@ -43,10 +43,6 @@ class DAVEVoiceClient:
         self._gw = None
         self._ready_evt = asyncio.Event()
         self._sd_evt = asyncio.Event()
-        # one-shot diagnostic flags (quieted once decryption is confirmed)
-        self._dbg_tx_ok = False
-        self._dbg_dave_ok = False
-        self._dbg_dave_none = False
 
     # ---- callbacks from the gateway ----
     def _on_ready(self, d):
@@ -62,15 +58,11 @@ class DAVEVoiceClient:
         secret_key = bytes(d["secret_key"])
         mode = d.get("mode") or self._chosen_mode
         self.transport = TransportCrypto(mode, secret_key)
-        print(f"[dave] session description: dave_version={self.dave_version} mode={mode}", flush=True)
         self._sd_evt.set()
 
     def _on_speaking(self, user_id, ssrc):
-        new = ssrc not in self.ssrc_to_user
         self.mls.recognized_user_ids.add(str(user_id))
         self.ssrc_to_user[ssrc] = user_id
-        if new:
-            print(f"[dave] speaking: ssrc={ssrc} uid={user_id}", flush=True)
         if self.dave_version >= 1:
             self.mls.refresh_ratchets(self.ssrc_to_user)
 
@@ -89,7 +81,6 @@ class DAVEVoiceClient:
             self.opus.reset(ssrc)
 
     def _on_execute(self, transition_id):
-        print(f"[dave] op22 execute_transition tid={transition_id}", flush=True)
         if self.dave_version >= 1:
             self.mls.refresh_ratchets(self.ssrc_to_user)
 
@@ -101,7 +92,6 @@ class DAVEVoiceClient:
             self.mls.refresh_ratchets(self.ssrc_to_user)
 
     def _on_prepare_passthrough(self):
-        print("[dave] op21 prepare_transition -> passthrough (downgrade to v0)", flush=True)
         for ssrc in list(self.mls.decryptors):
             self.mls.decryptor_for(ssrc).transition_to_passthrough_mode(True, 0.0)
 
@@ -137,13 +127,8 @@ class DAVEVoiceClient:
 
         try:
             transport_plain = self.transport.decrypt(header, ciphertext, nonce)
-        except Exception as e:
-            if not self._dbg_tx_ok:
-                print(f"[dave] transport decrypt error (will keep dropping): {e!r}", flush=True)
+        except Exception:
             return  # bad/non-media packet — drop without crashing the receive loop
-        if not self._dbg_tx_ok:
-            self._dbg_tx_ok = True
-            print(f"[dave] FIRST transport decrypt OK: {len(transport_plain)} bytes (ssrc={pkt.ssrc} ext={extended} ext_body_len={ext_body_len})", flush=True)
         # The RTP extension is added at the RTP layer AFTER the sender DAVE-encrypts,
         # so its body sits in front of the DAVE frame in the transport plaintext.
         # Strip it BEFORE the DAVE decrypt or it is counted as ciphertext and the
@@ -151,13 +136,7 @@ class DAVEVoiceClient:
         dave_frame = transport_plain[ext_body_len:] if ext_body_len else transport_plain
         frame = self.mls.decryptor_for(pkt.ssrc).decrypt(dave.MediaType.audio, dave_frame)
         if not frame:
-            if not self._dbg_dave_none:
-                self._dbg_dave_none = True
-                print(f"[dave] DAVE decrypt returned empty/None (no key ratchet yet?) ssrc={pkt.ssrc} uid={user_id}", flush=True)
             return
-        if not self._dbg_dave_ok:
-            self._dbg_dave_ok = True
-            print(f"[dave] FIRST DAVE frame decrypted: {len(frame)} bytes ssrc={pkt.ssrc} uid={user_id}", flush=True)
         pcm = self.opus.decode(pkt.ssrc, frame)
         if pcm:
             self.on_pcm(user_id, pcm)

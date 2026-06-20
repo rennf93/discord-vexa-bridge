@@ -16,6 +16,7 @@ is transmitting, so a gap with no packets ends an utterance.
 import asyncio
 import audioop  # stdlib on py3.11 (removed in 3.13 — keep the base image at 3.11)
 import io
+import logging
 import os
 import threading
 import time
@@ -28,6 +29,11 @@ import asyncpg
 import discord
 from dave_voice.discord_protocol import DAVEVoiceProtocol
 from dave_voice.voice_client import DAVEVoiceClient
+
+# libdave (via dave.py) logs per-frame decrypt failures through the "dave" logger.
+# A chunk of frames legitimately fail at stream start / silence / epoch edges; the
+# successful frames are plenty for accurate transcripts, so silence the noise.
+logging.getLogger("dave").setLevel(logging.CRITICAL)
 
 TOKEN          = os.environ["DISCORD_TOKEN"]
 DATABASE_URL   = os.environ["DATABASE_URL"]           # postgresql://postgres:pw@postgres:5432/vexa
@@ -152,22 +158,34 @@ def to_mono_wav(pcm_stereo: bytes) -> bytes:
 
 
 async def transcribe(wav: bytes) -> str:
-    form = aiohttp.FormData()
-    form.add_field("file", wav, filename="utterance.wav", content_type="audio/wav")
-    form.add_field("model", "whisper-1")  # OpenAI-compatible field; worker uses its own MODEL_SIZE
-    if LANGUAGE:
-        form.add_field("language", LANGUAGE)
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(TRANSCRIBE_URL, data=form,
-                              timeout=aiohttp.ClientTimeout(total=120)) as r:
-                if r.status != 200:
-                    print(f"transcribe HTTP {r.status}", flush=True)
-                    return ""
-                return ((await r.json()).get("text") or "").strip()
-    except Exception as e:
-        print(f"transcribe error: {e}", flush=True)
-        return ""
+    # Retry only on connection errors (worker restarting / still loading its model);
+    # do NOT retry timeouts — those mean the worker is overloaded and retrying would
+    # only deepen the backlog. FormData is single-use, so rebuild it per attempt.
+    attempts = 3
+    for attempt in range(attempts):
+        form = aiohttp.FormData()
+        form.add_field("file", wav, filename="utterance.wav", content_type="audio/wav")
+        form.add_field("model", "whisper-1")  # OpenAI-compatible field; worker uses its own MODEL_SIZE
+        if LANGUAGE:
+            form.add_field("language", LANGUAGE)
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(TRANSCRIBE_URL, data=form,
+                                  timeout=aiohttp.ClientTimeout(total=120)) as r:
+                    if r.status != 200:
+                        print(f"transcribe HTTP {r.status}", flush=True)
+                        return ""
+                    return ((await r.json()).get("text") or "").strip()
+        except aiohttp.ClientConnectorError as e:
+            if attempt < attempts - 1:
+                await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s backoff
+                continue
+            print(f"transcribe worker unreachable after {attempts} tries: {e}", flush=True)
+            return ""
+        except Exception as e:
+            print(f"transcribe error: {e}", flush=True)
+            return ""
+    return ""
 
 
 async def store(meeting: Meeting, uid: int, pcm: bytes, t0: float, t1: float):
