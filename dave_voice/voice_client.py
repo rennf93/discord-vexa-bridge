@@ -11,7 +11,7 @@ from dave_voice.mls import MLSManager
 from dave_voice.opus_decode import OpusDecoders
 from dave_voice.rtp import parse_rtp_header, HEADER_LEN
 from dave_voice.transport import TransportCrypto, SUPPORTED_MODES
-from dave_voice.udp_receiver import open_udp
+from dave_voice.udp_receiver import VoiceUDPProtocol
 from dave_voice.voice_ws import VoiceGateway
 
 _EXT_FLAG = 0x10  # version_flags bit indicating an RTP header extension
@@ -131,7 +131,7 @@ class DAVEVoiceClient:
 
         # Hand the connected socket to an asyncio datagram endpoint for receive.
         self._udp_transport, _ = await loop.create_datagram_endpoint(
-            lambda: __import__("dave_voice.udp_receiver", fromlist=["VoiceUDPProtocol"]).VoiceUDPProtocol(self._handle_packet),
+            lambda: VoiceUDPProtocol(self._handle_packet),
             sock=self._sock,
         )
 
