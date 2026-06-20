@@ -9,4 +9,5 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
+COPY dave_voice ./dave_voice
 CMD ["python", "bot.py"]
