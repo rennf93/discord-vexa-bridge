@@ -1,0 +1,17 @@
+# ── Add this service to your vexa docker-compose.yml (same indentation as the others),
+#    and put the discord-adapter/ folder (bot.py + Dockerfile) under the repo root
+#    so the build context resolves. Then redeploy the project.
+
+  discord-adapter:
+    build:
+      context: ./discord-adapter
+    environment:
+      DISCORD_TOKEN: "PASTE_YOUR_BOT_TOKEN"
+      DATABASE_URL: postgresql://postgres:change-me-db@postgres:5432/vexa
+      TRANSCRIBE_URL: http://transcription-worker:8000/v1/audio/transcriptions
+      VEXA_USER_ID: "1"          # <- the user id from your create-user curl
+      LANGUAGE: ""               # "" = autodetect (leave blank for it/es/en mixed)
+      SILENCE_MS: "800"          # gap (ms) that ends an utterance
+    depends_on: [postgres, transcription-worker]
+    networks: [vexa]
+    restart: unless-stopped
