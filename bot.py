@@ -209,9 +209,19 @@ async def join(ctx: discord.ApplicationContext):
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
     _voice_server_waiters[ctx.guild.id] = fut
-    await ctx.guild.change_voice_state(channel=channel)  # sends gateway op 4
-    token, endpoint = await asyncio.wait_for(fut, timeout=15)
-    session_id = _voice_session_ids[ctx.guild.id]
+    try:
+        await ctx.guild.change_voice_state(channel=channel)  # sends gateway op 4
+        token, endpoint = await asyncio.wait_for(fut, timeout=15)
+    except asyncio.TimeoutError:
+        await ctx.respond("Timed out connecting to voice. Try again.", ephemeral=True)
+        return
+    finally:
+        _voice_server_waiters.pop(ctx.guild.id, None)
+
+    session_id = _voice_session_ids.get(ctx.guild.id)
+    if session_id is None:
+        await ctx.respond("Didn't receive a voice session id; try again.", ephemeral=True)
+        return
 
     t0 = time.monotonic()
     session_uid = str(uuid.uuid4())
