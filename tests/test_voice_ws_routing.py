@@ -35,13 +35,14 @@ class FakeMLS:
 
 
 def make_gw():
-    seen = {"ready": None, "sd": None, "speaking": [], "sent": []}
+    seen = {"ready": None, "sd": None, "speaking": [], "sent": [], "mls_change": 0}
     gw = VoiceGateway(
         endpoint="x", server_id=1, user_id=2, session_id="s", token="t",
         mls=FakeMLS(),
         on_ready=lambda d: seen.__setitem__("ready", d),
         on_session_description=lambda d: seen.__setitem__("sd", d),
         on_speaking=lambda uid, ssrc: seen["speaking"].append((uid, ssrc)),
+        on_mls_change=lambda: seen.__setitem__("mls_change", seen["mls_change"] + 1),
     )
 
     async def fake_json(op, d):
@@ -106,6 +107,8 @@ async def test_binary_announce_commit_parses_transition_id_and_replies_ready():
     await gw._dispatch(msg, is_binary=True)
     assert ("announce", transition_id, commit_bytes) in gw.mls.calls
     assert ("json", VoiceOp.DAVE_TRANSITION_READY, {"transition_id": transition_id}) in seen["sent"]
+    # a commit advances the epoch -> ratchets must be refreshed (incl. tid=0 with no op22)
+    assert seen["mls_change"] == 1
 
 
 async def test_clients_connect_and_disconnect_invoke_callbacks():

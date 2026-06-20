@@ -21,7 +21,8 @@ class VoiceGateway:
     def __init__(self, *, endpoint, server_id, user_id, session_id, token,
                  mls, on_ready, on_session_description, on_speaking,
                  on_execute=None, on_prepare_passthrough=None,
-                 on_clients_connect=None, on_client_disconnect=None):
+                 on_clients_connect=None, on_client_disconnect=None,
+                 on_mls_change=None):
         self.endpoint = endpoint
         self.server_id = server_id
         self.user_id = user_id
@@ -35,6 +36,7 @@ class VoiceGateway:
         self.on_prepare_passthrough = on_prepare_passthrough or (lambda: None)
         self.on_clients_connect = on_clients_connect or (lambda user_ids: None)
         self.on_client_disconnect = on_client_disconnect or (lambda user_id: None)
+        self.on_mls_change = on_mls_change or (lambda: None)
         self.ws = None
         self.last_seq = 0
         self._hb_nonce = itertools.count(1)
@@ -105,9 +107,13 @@ class VoiceGateway:
             elif opcode == VoiceOp.DAVE_MLS_ANNOUNCE_COMMIT:
                 tid = struct.unpack_from(">H", payload, 0)[0]
                 await self._send_reply(self.mls.on_announce_commit(tid, payload[2:]))
+                # a commit advances the epoch (and, for tid=0, executes immediately
+                # with no op22) — rewire per-sender key ratchets now.
+                self.on_mls_change()
             elif opcode == VoiceOp.DAVE_MLS_WELCOME:
                 tid = struct.unpack_from(">H", payload, 0)[0]
                 await self._send_reply(self.mls.on_welcome(tid, payload[2:]))
+                self.on_mls_change()
             return
 
         frame = json.loads(message)

@@ -93,6 +93,13 @@ class DAVEVoiceClient:
         if self.dave_version >= 1:
             self.mls.refresh_ratchets(self.ssrc_to_user)
 
+    def _on_mls_change(self):
+        # Fired after a commit/welcome advances the MLS epoch (incl. tid=0 immediate
+        # transitions that send no op22). Wire each established sender's key ratchet
+        # into its Decryptor now that the group has exported keys.
+        if self.dave_version >= 1:
+            self.mls.refresh_ratchets(self.ssrc_to_user)
+
     def _on_prepare_passthrough(self):
         print("[dave] op21 prepare_transition -> passthrough (downgrade to v0)", flush=True)
         for ssrc in list(self.mls.decryptors):
@@ -169,6 +176,7 @@ class DAVEVoiceClient:
             on_prepare_passthrough=self._on_prepare_passthrough,
             on_clients_connect=self._on_clients_connect,
             on_client_disconnect=self._on_client_disconnect,
+            on_mls_change=self._on_mls_change,
         )
         await self._gw.connect()
         await self._ready_evt.wait()
