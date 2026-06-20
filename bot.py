@@ -45,6 +45,25 @@ intents = discord.Intents.default()
 intents.voice_states = True
 bot = discord.Bot(intents=intents)
 pool: asyncpg.Pool | None = None
+_pool_lock = asyncio.Lock()
+
+
+async def ensure_pool() -> asyncpg.Pool:
+    """Lazily create the asyncpg pool on first use.
+
+    Don't rely on on_ready alone: the Discord gateway can become ready before
+    Postgres accepts connections (compose `depends_on` doesn't wait for DB
+    readiness), which leaves `pool` None and makes `/join` fail with a confusing
+    AttributeError. This creates the pool once, on demand, and surfaces a clear
+    asyncpg error here if the DB is genuinely unreachable/misconfigured.
+    """
+    global pool
+    if pool is not None:
+        return pool
+    async with _pool_lock:
+        if pool is None:
+            pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4)
+    return pool
 
 
 class PcmBuffer:
@@ -150,7 +169,7 @@ async def store(meeting: Meeting, uid: int, pcm: bytes, t0: float, t1: float):
     if not text:
         return
     speaker = await meeting.name_for(uid)
-    async with pool.acquire() as c:
+    async with (await ensure_pool()).acquire() as c:
         await c.execute(
             "INSERT INTO transcriptions"
             " (meeting_id, start_time, end_time, text, speaker, language, session_uid, segment_id, created_at)"
@@ -206,7 +225,7 @@ async def join(ctx: discord.ApplicationContext):
 
     t0 = time.monotonic()
     session_uid = str(uuid.uuid4())
-    async with pool.acquire() as c:
+    async with (await ensure_pool()).acquire() as c:
         meeting_id = await c.fetchval(
             "INSERT INTO meetings"
             " (user_id, platform, platform_specific_id, status, start_time, data, created_at, updated_at)"
@@ -231,7 +250,7 @@ async def join(ctx: discord.ApplicationContext):
         await client.start()
     except Exception as e:
         await vc.disconnect(force=True)
-        async with pool.acquire() as c:
+        async with (await ensure_pool()).acquire() as c:
             await c.execute(
                 "UPDATE meetings SET status='failed', end_time=now(), updated_at=now() WHERE id=$1",
                 meeting_id,
@@ -256,7 +275,7 @@ async def leave(ctx: discord.ApplicationContext):
     await vc.disconnect(force=True)  # change_voice_state(None) + cleanup
     for uid, pcm, t0, t1 in sink.drain_all():
         await store(meeting, uid, pcm, t0, t1)
-    async with pool.acquire() as c:
+    async with (await ensure_pool()).acquire() as c:
         await c.execute(
             "UPDATE meetings SET status='completed', end_time=now(), updated_at=now() WHERE id=$1",
             meeting.id,
@@ -266,9 +285,10 @@ async def leave(ctx: discord.ApplicationContext):
 
 @bot.event
 async def on_ready():
-    global pool
-    if pool is None:
-        pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4)
+    try:
+        await ensure_pool()  # best-effort warm-up; ensure_pool retries on first use
+    except Exception as e:
+        print(f"pool init deferred (will retry on first /join): {e}", flush=True)
     if not discord.opus.is_loaded():
         for lib in ("libopus.so.0", "libopus.so", "opus"):
             try:
@@ -279,4 +299,5 @@ async def on_ready():
     print(f"discord-adapter ready as {bot.user}", flush=True)
 
 
-bot.run(TOKEN)
+if __name__ == "__main__":
+    bot.run(TOKEN)
