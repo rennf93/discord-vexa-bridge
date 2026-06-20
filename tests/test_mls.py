@@ -59,10 +59,11 @@ class FakeDecryptor:
 def patch_dave(monkeypatch):
     monkeypatch.setattr(mls_mod.dave, "Session", FakeSession)
     monkeypatch.setattr(mls_mod.dave, "Decryptor", FakeDecryptor)
-    # RejectType used in isinstance checks; give it a sentinel class
-    class RejectType:  # noqa
-        failed = object()
-        ignored = object()
+    # RejectType used in isinstance checks; mirror the real binding (enum.IntEnum)
+    import enum
+    class RejectType(enum.IntEnum):  # noqa
+        failed = 0
+        ignored = 1
     monkeypatch.setattr(mls_mod.dave, "RejectType", RejectType)
 
 
@@ -111,3 +112,23 @@ def test_refresh_ratchets_assigns_per_ssrc():
     m.session._ratchets["7"] = r
     m.refresh_ratchets({1234: 7})
     assert m.decryptor_for(1234).ratchet is r
+
+
+def test_announce_commit_returns_invalid_on_reject():
+    m = MLSManager(self_user_id=42)
+    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    # Override process_commit to return a RejectType instance (failure path)
+    m.session.process_commit = lambda commit: mls_mod.dave.RejectType.failed
+    op, payload = m.on_announce_commit(transition_id=5, commit=b"C")
+    assert op == VoiceOp.DAVE_MLS_INVALID_COMMIT_WELCOME
+    assert json.loads(payload) == {"transition_id": 5}
+
+
+def test_welcome_none_returns_invalid():
+    m = MLSManager(self_user_id=42)
+    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    # Override process_welcome to return None (failure path)
+    m.session.process_welcome = lambda welcome, recognized: None
+    op, payload = m.on_welcome(transition_id=8, welcome=b"W")
+    assert op == VoiceOp.DAVE_MLS_INVALID_COMMIT_WELCOME
+    assert json.loads(payload) == {"transition_id": 8}
