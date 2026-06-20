@@ -157,9 +157,10 @@ def test_handle_packet_drops_when_transport_none():
     assert emitted == []
 
 
-def test_handle_packet_strips_rtp_extension_body():
-    """Extended packet: preamble is AAD, extension body rides in the ciphertext and
-    is stripped after transport + DAVE decrypt, leaving only the Opus payload."""
+def test_handle_packet_strips_rtp_extension_body_before_dave_decrypt():
+    """Extended packet: preamble is AAD; the extension body rides in the transport
+    ciphertext and must be stripped BEFORE the DAVE decrypt (else it is counted as
+    DAVE ciphertext and the AES-GCM tag fails)."""
     emitted = []
     c = DAVEVoiceClient(
         server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
@@ -171,22 +172,23 @@ def test_handle_packet_strips_rtp_extension_body():
         def decrypt(self, header, ciphertext, nonce):
             return ciphertext
 
-    class IdentityDecryptor:
+    class MarkingDecryptor:
+        # marks its input so the test proves the extension body was already gone
         def decrypt(self, mt, frame):
-            return frame
+            return b"D:" + frame
 
-    class IdentityMLS:
+    class MarkingMLS:
         def decryptor_for(self, ssrc):
-            return IdentityDecryptor()
+            return MarkingDecryptor()
 
     c.transport = IdentityTransport()
-    c.mls = IdentityMLS()
+    c.mls = MarkingMLS()
     c.opus = FakeOpus()
     c.ssrc_to_user = {0x01020304: 77}
 
     header = struct.pack(">BBHII", 0x90, 0x78, 1, 2, 0x01020304)  # 0x90: extension bit set
     preamble = b"\xbe\xde" + struct.pack(">H", 1)  # profile + length = 1 word
-    ext_body = b"EXTB"  # 1 word = 4 bytes, must be stripped
+    ext_body = b"EXTB"  # 1 word = 4 bytes, must be stripped BEFORE the DAVE decrypt
     opus = b"OPUS-AUDIO"
     nonce4 = struct.pack(">I", 9)
     packet = header + preamble + ext_body + opus + nonce4
@@ -196,4 +198,5 @@ def test_handle_packet_strips_rtp_extension_body():
     assert len(emitted) == 1
     uid, pcm = emitted[0]
     assert uid == 77
-    assert pcm == b"PCM(OPUS-AUDIO)"  # extension body stripped, opus survives
+    # the DAVE decryptor saw the opus WITHOUT the extension body in front of it
+    assert pcm == b"PCM(D:OPUS-AUDIO)"

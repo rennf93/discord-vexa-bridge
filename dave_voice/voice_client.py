@@ -143,8 +143,13 @@ class DAVEVoiceClient:
             return  # bad/non-media packet — drop without crashing the receive loop
         if not self._dbg_tx_ok:
             self._dbg_tx_ok = True
-            print(f"[dave] FIRST transport decrypt OK: {len(transport_plain)} bytes (ssrc={pkt.ssrc} ext={extended})", flush=True)
-        frame = self.mls.decryptor_for(pkt.ssrc).decrypt(dave.MediaType.audio, transport_plain)
+            print(f"[dave] FIRST transport decrypt OK: {len(transport_plain)} bytes (ssrc={pkt.ssrc} ext={extended} ext_body_len={ext_body_len})", flush=True)
+        # The RTP extension is added at the RTP layer AFTER the sender DAVE-encrypts,
+        # so its body sits in front of the DAVE frame in the transport plaintext.
+        # Strip it BEFORE the DAVE decrypt or it is counted as ciphertext and the
+        # AES-GCM tag fails ("Failed to finalize decryption").
+        dave_frame = transport_plain[ext_body_len:] if ext_body_len else transport_plain
+        frame = self.mls.decryptor_for(pkt.ssrc).decrypt(dave.MediaType.audio, dave_frame)
         if not frame:
             if not self._dbg_dave_none:
                 self._dbg_dave_none = True
@@ -153,8 +158,6 @@ class DAVEVoiceClient:
         if not self._dbg_dave_ok:
             self._dbg_dave_ok = True
             print(f"[dave] FIRST DAVE frame decrypted: {len(frame)} bytes ssrc={pkt.ssrc} uid={user_id}", flush=True)
-        if ext_body_len:
-            frame = frame[ext_body_len:]  # strip the decrypted RTP extension body
         pcm = self.opus.decode(pkt.ssrc, frame)
         if pcm:
             self.on_pcm(user_id, pcm)
