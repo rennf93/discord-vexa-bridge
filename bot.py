@@ -40,6 +40,9 @@ MIN_MS         = int(os.environ.get("MIN_UTTERANCE_MS", "400"))# drop blips shor
 # Pycord decodes Opus to 48 kHz, 16-bit, stereo PCM in the sink.
 SR, CH, SW = 48_000, 2, 2
 BYTES_PER_SEC = SR * CH * SW
+# The transcription worker feeds WAV samples straight to Whisper as 16 kHz, so we
+# must downsample to 16 kHz before sending (sending 48 kHz makes speech play 3x slow).
+OUT_RATE = 16_000
 
 intents = discord.Intents.default()
 intents.voice_states = True
@@ -132,14 +135,19 @@ active: dict[int, tuple] = {}
 
 
 def to_mono_wav(pcm_stereo: bytes) -> bytes:
-    """Downmix 48 kHz stereo PCM to mono and wrap as WAV. The worker resamples to 16 kHz."""
-    mono = audioop.tomono(pcm_stereo, SW, 0.5, 0.5)
+    """Downmix 48 kHz stereo PCM to mono, resample to 16 kHz, and wrap as WAV.
+
+    The worker hands WAV samples to Whisper assuming 16 kHz, so we must downsample
+    here — sending 48 kHz stretches speech 3x and the VAD discards it as non-speech.
+    """
+    mono = audioop.tomono(pcm_stereo, SW, 0.5, 0.5)             # 48 kHz stereo -> 48 kHz mono
+    mono16k, _ = audioop.ratecv(mono, SW, 1, SR, OUT_RATE, None)  # 48 kHz -> 16 kHz
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(SW)
-        w.setframerate(SR)
-        w.writeframes(mono)
+        w.setframerate(OUT_RATE)
+        w.writeframes(mono16k)
     return buf.getvalue()
 
 
