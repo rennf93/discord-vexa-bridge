@@ -10,6 +10,10 @@ class FakeMLS:
     def __init__(self):
         self.calls = []
 
+    def initialize_group(self, version):
+        self.calls.append(("init", version))
+        return (VoiceOp.DAVE_MLS_KEY_PACKAGE, b"KP")
+
     def on_external_sender(self, pkg):
         self.calls.append(("ext", pkg))
 
@@ -59,6 +63,9 @@ async def test_ready_and_session_description_and_speaking():
     assert seen["ready"]["ssrc"] == 9
     assert seen["sd"]["dave_protocol_version"] == 1
     assert seen["speaking"] == [(77, 9)]
+    # op 4 must init the MLS group and publish the key package (op 26)
+    assert ("init", 1) in gw.mls.calls
+    assert ("bin", VoiceOp.DAVE_MLS_KEY_PACKAGE, b"KP") in seen["sent"]
 
 
 async def test_binary_external_sender_updates_seq_and_calls_mls():

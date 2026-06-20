@@ -124,6 +124,10 @@ class VoiceGateway:
             self.on_ready(d)
         elif op == VoiceOp.SESSION_DESCRIPTION:
             self.on_session_description(d)
+            # py-cord inits the MLS group here (reinit_dave_session on op 4) and
+            # immediately publishes its key package so the gateway can add us.
+            if (d.get("dave_protocol_version", 0) or 0) >= 1:
+                await self._send_reply(self.mls.initialize_group(d["dave_protocol_version"]))
         elif op == VoiceOp.SPEAKING:
             self.on_speaking(int(d["user_id"]), int(d["ssrc"]))
         elif op == VoiceOp.DAVE_PREPARE_EPOCH:

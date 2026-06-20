@@ -46,8 +46,24 @@ class MLSManager:
         if self._initialized:
             self.session.set_protocol_version(version)
 
+    def initialize_group(self, version: int):
+        """Create (or recreate) the local MLS group and return the op-26 key package.
+
+        Per py-cord's reinit_dave_session (state.py): the group is created on op 4
+        (Session Description) when dave_protocol_version > 0, and the client
+        immediately publishes its key package so the gateway can add it.
+        """
+        self.version = version
+        if self._initialized:
+            self.session.reset()
+        self.session.init(version, self.group_id, str(self.self_user_id))
+        self._initialized = True
+        kp = self.session.get_marshalled_key_package()
+        _d(f"group initialized (version={version} group={self.group_id} {self._group_state()}); sending key package {len(kp)} bytes")
+        return (VoiceOp.DAVE_MLS_KEY_PACKAGE, kp)
+
     def on_external_sender(self, package: bytes) -> None:
-        _d(f"op25 external sender: {len(package)} bytes")
+        _d(f"op25 external sender: {len(package)} bytes (group {self._group_state()})")
         try:
             self.session.set_external_sender(package)
         except Exception as e:
@@ -57,11 +73,7 @@ class MLSManager:
         _d(f"op24 prepare_epoch: version={version} epoch={epoch} recognized={sorted(self.recognized_user_ids)}")
         self.version = version
         if epoch == 1:
-            self.session.init(version, self.group_id, str(self.self_user_id))
-            self._initialized = True
-            kp = self.session.get_marshalled_key_package()
-            _d(f"group init done ({self._group_state()}); sending key package {len(kp)} bytes")
-            return (VoiceOp.DAVE_MLS_KEY_PACKAGE, kp)
+            return self.initialize_group(version)
         # epoch > 1: protocol-version change of the existing group
         if self._initialized:
             self.session.set_protocol_version(version)
