@@ -15,9 +15,9 @@ def test_aes256_gcm_rtpsize_roundtrip():
     header = _rtp_header()
     plaintext = b"decoded-opus-frame-bytes"
     nonce4 = struct.pack(">I", 5)
-    ct = AESGCM(key).encrypt(b"\x00" * 8 + nonce4, plaintext, header)
-    packet = header + ct + nonce4
-    out = TransportCrypto("aead_aes256_gcm_rtpsize", key).decrypt(packet)
+    # nonce value FIRST, then zero pad to 12 bytes (Discord/py-cord convention)
+    ct = AESGCM(key).encrypt(nonce4 + b"\x00" * 8, plaintext, header)
+    out = TransportCrypto("aead_aes256_gcm_rtpsize", key).decrypt(header, ct, nonce4)
     assert out == plaintext
 
 
@@ -26,13 +26,22 @@ def test_xchacha20_poly1305_rtpsize_roundtrip():
     header = _rtp_header()
     plaintext = b"decoded-opus-frame-bytes"
     nonce4 = struct.pack(">I", 9)
-    full_nonce = b"\x00" * 20 + nonce4
+    full_nonce = nonce4 + b"\x00" * 20  # value first, then zero pad to 24 bytes
     ct = bindings.crypto_aead_xchacha20poly1305_ietf_encrypt(
         plaintext, header, full_nonce, key
     )
-    packet = header + ct + nonce4
-    out = TransportCrypto("aead_xchacha20_poly1305_rtpsize", key).decrypt(packet)
+    out = TransportCrypto("aead_xchacha20_poly1305_rtpsize", key).decrypt(header, ct, nonce4)
     assert out == plaintext
+
+
+def test_wrong_nonce_order_does_not_authenticate():
+    # Guards the exact bug we hit live: a zeros-first nonce must NOT decrypt.
+    key = os.urandom(32)
+    header = _rtp_header()
+    nonce4 = struct.pack(">I", 7)
+    ct = AESGCM(key).encrypt(b"\x00" * 8 + nonce4, b"payload", header)  # wrong order
+    with pytest.raises(Exception):
+        TransportCrypto("aead_aes256_gcm_rtpsize", key).decrypt(header, ct, nonce4)
 
 
 def test_unknown_mode_raises():

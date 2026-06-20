@@ -5,8 +5,8 @@ from dave_voice.voice_client import DAVEVoiceClient
 
 
 class FakeTransport:
-    def decrypt(self, packet, header_len=12):
-        return b"CIPHER->" + packet[header_len:-4]
+    def decrypt(self, header, ciphertext, nonce):
+        return b"CIPHER->" + ciphertext
 
 
 class FakeDecryptor:
@@ -155,3 +155,45 @@ def test_handle_packet_drops_when_transport_none():
     header = struct.pack(">BBHII", 0x80, 0x78, 1, 2, 0x01020304)
     c._handle_packet(header + b"frame" + struct.pack(">I", 9))
     assert emitted == []
+
+
+def test_handle_packet_strips_rtp_extension_body():
+    """Extended packet: preamble is AAD, extension body rides in the ciphertext and
+    is stripped after transport + DAVE decrypt, leaving only the Opus payload."""
+    emitted = []
+    c = DAVEVoiceClient(
+        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
+        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+    )
+
+    class IdentityTransport:
+        # echo the ciphertext so we can track exact byte boundaries
+        def decrypt(self, header, ciphertext, nonce):
+            return ciphertext
+
+    class IdentityDecryptor:
+        def decrypt(self, mt, frame):
+            return frame
+
+    class IdentityMLS:
+        def decryptor_for(self, ssrc):
+            return IdentityDecryptor()
+
+    c.transport = IdentityTransport()
+    c.mls = IdentityMLS()
+    c.opus = FakeOpus()
+    c.ssrc_to_user = {0x01020304: 77}
+
+    header = struct.pack(">BBHII", 0x90, 0x78, 1, 2, 0x01020304)  # 0x90: extension bit set
+    preamble = b"\xbe\xde" + struct.pack(">H", 1)  # profile + length = 1 word
+    ext_body = b"EXTB"  # 1 word = 4 bytes, must be stripped
+    opus = b"OPUS-AUDIO"
+    nonce4 = struct.pack(">I", 9)
+    packet = header + preamble + ext_body + opus + nonce4
+
+    c._handle_packet(packet)
+
+    assert len(emitted) == 1
+    uid, pcm = emitted[0]
+    assert uid == 77
+    assert pcm == b"PCM(OPUS-AUDIO)"  # extension body stripped, opus survives

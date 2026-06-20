@@ -2,7 +2,6 @@
 """Top-level DAVE voice receive client: assembles WS + UDP + transport + MLS + opus."""
 import asyncio
 import socket
-import struct
 
 import dave
 
@@ -96,19 +95,39 @@ class DAVEVoiceClient:
         if len(data) < HEADER_LEN + 4:
             return
         pkt = parse_rtp_header(data)
-        header_len = HEADER_LEN
-        if pkt.version_flags & _EXT_FLAG:
-            # extension: [u16 profile][u16 length-in-32bit-words] then words
-            ext_words = struct.unpack_from(">H", data, HEADER_LEN + 2)[0]
-            header_len = HEADER_LEN + 4 + ext_words * 4
-        payload = self.transport.decrypt(data, header_len)
         user_id = self.ssrc_to_user.get(pkt.ssrc)
         if user_id is None:
             return
-        plaintext = self.mls.decryptor_for(pkt.ssrc).decrypt(dave.MediaType.audio, payload)
-        if not plaintext:
+
+        # rtpsize framing (matches discord/voice/packets/rtp.py adjust_rtpsize):
+        # skip CSRCs; the trailing 4 bytes are the nonce; for an extended packet the
+        # 4-byte extension preamble is authenticated (AAD) while the extension body
+        # stays in the ciphertext and is stripped after transport + DAVE decryption.
+        cc = pkt.version_flags & 0x0F
+        extended = bool(pkt.version_flags & _EXT_FLAG)
+        header = data[:HEADER_LEN]
+        payload = data[HEADER_LEN + cc * 4:]
+        if len(payload) < 4:
             return
-        pcm = self.opus.decode(pkt.ssrc, plaintext)
+        nonce = payload[-4:]
+        ext_body_len = 0
+        if extended:
+            header = header + payload[:4]
+            ext_body_len = int.from_bytes(payload[2:4], "big") * 4
+            ciphertext = payload[4:-4]
+        else:
+            ciphertext = payload[:-4]
+
+        try:
+            transport_plain = self.transport.decrypt(header, ciphertext, nonce)
+        except Exception:
+            return  # bad/non-media packet — drop without crashing the receive loop
+        frame = self.mls.decryptor_for(pkt.ssrc).decrypt(dave.MediaType.audio, transport_plain)
+        if not frame:
+            return
+        if ext_body_len:
+            frame = frame[ext_body_len:]  # strip the decrypted RTP extension body
+        pcm = self.opus.decode(pkt.ssrc, frame)
         if pcm:
             self.on_pcm(user_id, pcm)
 
