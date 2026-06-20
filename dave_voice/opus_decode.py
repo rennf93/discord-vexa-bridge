@@ -16,7 +16,10 @@ class OpusDecoders:
         if dec is None:
             dec = self._factory()
             self._decoders[ssrc] = dec
-        return dec.decode(opus_bytes)
+        # fec=False: decode this packet's audio normally. The binding defaults to
+        # fec=True, which decodes in-band Forward Error Correction (a redundant copy
+        # of the PREVIOUS frame) instead of the current frame -> garbled output.
+        return dec.decode(opus_bytes, fec=False)
 
     def reset(self, ssrc: int) -> None:
         self._decoders.pop(ssrc, None)
