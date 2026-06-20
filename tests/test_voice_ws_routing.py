@@ -89,3 +89,13 @@ async def test_prepare_epoch_sends_key_package():
     gw, seen = make_gw()
     await gw._dispatch(json.dumps({"op": 24, "d": {"protocol_version": 1, "epoch": 1}}), is_binary=False)
     assert ("bin", VoiceOp.DAVE_MLS_KEY_PACKAGE, b"KP") in seen["sent"]
+
+
+async def test_binary_announce_commit_parses_transition_id_and_replies_ready():
+    gw, seen = make_gw()
+    transition_id = 7
+    commit_bytes = b"COMMITBYTES"
+    msg = struct.pack(">H", 15) + bytes([29]) + struct.pack(">H", transition_id) + commit_bytes
+    await gw._dispatch(msg, is_binary=True)
+    assert ("announce", transition_id, commit_bytes) in gw.mls.calls
+    assert ("json", VoiceOp.DAVE_TRANSITION_READY, {"transition_id": transition_id}) in seen["sent"]

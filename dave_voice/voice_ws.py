@@ -4,11 +4,11 @@ import itertools
 import json
 import struct
 
+import dave
 import websockets
 
 from dave_voice.opcodes import (
     VoiceOp,
-    BINARY_SERVER_OPS,
     decode_binary,
     encode_binary,
 )
@@ -46,7 +46,7 @@ class VoiceGateway:
             "user_id": str(self.user_id),
             "session_id": self.session_id,
             "token": self.token,
-            "max_dave_protocol_version": __import__("dave").get_max_supported_protocol_version(),
+            "max_dave_protocol_version": dave.get_max_supported_protocol_version(),
         })
         self._recv_task = asyncio.create_task(self._recv_loop())
 
@@ -115,7 +115,8 @@ class VoiceGateway:
 
         if op == VoiceOp.HELLO:
             interval = d["heartbeat_interval"]
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(interval))
+            if self._heartbeat_task is None:
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(interval))
         elif op == VoiceOp.READY:
             self.on_ready(d)
         elif op == VoiceOp.SESSION_DESCRIPTION:
