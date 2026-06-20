@@ -1,0 +1,7 @@
+py-cord[voice]
+asyncpg
+aiohttp
+dave.py
+websockets
+cryptography
+PyNaCl

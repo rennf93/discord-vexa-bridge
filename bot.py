@@ -26,7 +26,7 @@ from collections import defaultdict
 import aiohttp
 import asyncpg
 import discord
-from discord.sinks import Sink
+from dave_voice.voice_client import DAVEVoiceClient
 
 TOKEN          = os.environ["DISCORD_TOKEN"]
 DATABASE_URL   = os.environ["DATABASE_URL"]           # postgresql://postgres:pw@postgres:5432/vexa
@@ -46,17 +46,16 @@ bot = discord.Bot(intents=intents)
 pool: asyncpg.Pool | None = None
 
 
-class LiveSink(Sink):
-    """Receives decoded PCM per user on pycord's voice-recv thread."""
+class PcmBuffer:
+    """Accumulates per-user PCM emitted by DAVEVoiceClient; silence-gap segmented."""
 
     def __init__(self):
-        super().__init__()
         self.lock = threading.Lock()
         self.buf: dict[int, bytearray] = defaultdict(bytearray)
         self.last: dict[int, float] = {}
         self.start: dict[int, float] = {}
 
-    def write(self, data, user):  # called from a non-async audio thread
+    def write(self, user: int, data: bytes):
         now = time.monotonic()
         with self.lock:
             if not self.buf[user]:
@@ -78,10 +77,10 @@ class LiveSink(Sink):
                 self.buf[user] = bytearray()
         return out
 
-    def drain_ready(self, silence_s):  # users who've gone quiet
+    def drain_ready(self, silence_s):
         return self._pop(only_silent=True, silence_s=silence_s)
 
-    def drain_all(self):               # everything (on stop)
+    def drain_all(self):
         return self._pop(only_silent=False)
 
 
@@ -108,8 +107,28 @@ class Meeting:
         return name
 
 
-# guild_id -> (voice_client, sink, meeting, flusher_task)
-active: dict[int, tuple[discord.VoiceClient, LiveSink, Meeting, asyncio.Task]] = {}
+# guild_id -> asyncio.Future resolved with (token, endpoint)
+_voice_server_waiters: dict[int, asyncio.Future] = {}
+_voice_session_ids: dict[int, str] = {}
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.id == bot.user.id and after.channel is not None:
+        _voice_session_ids[after.channel.guild.id] = after.session_id
+
+
+@bot.event
+async def on_voice_server_update(data):
+    # py-cord fires this raw event with {'guild_id', 'token', 'endpoint'}
+    gid = int(data["guild_id"])
+    fut = _voice_server_waiters.get(gid)
+    if fut and not fut.done():
+        fut.set_result((data["token"], data["endpoint"]))
+
+
+# active: guild_id -> (client, sink, meeting, flusher_task)
+active: dict[int, tuple] = {}
 
 
 def to_mono_wav(pcm_stereo: bytes) -> bytes:
@@ -186,10 +205,26 @@ async def join(ctx: discord.ApplicationContext):
 
     channel = ctx.author.voice.channel
     await ctx.defer()
-    vc = await channel.connect()
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _voice_server_waiters[ctx.guild.id] = fut
+    try:
+        await ctx.guild.change_voice_state(channel=channel)  # sends gateway op 4
+        token, endpoint = await asyncio.wait_for(fut, timeout=15)
+    except asyncio.TimeoutError:
+        await ctx.respond("Timed out connecting to voice. Try again.", ephemeral=True)
+        return
+    finally:
+        _voice_server_waiters.pop(ctx.guild.id, None)
+
+    session_id = _voice_session_ids.get(ctx.guild.id)
+    if session_id is None:
+        await ctx.respond("Didn't receive a voice session id; try again.", ephemeral=True)
+        return
+
     t0 = time.monotonic()
     session_uid = str(uuid.uuid4())
-
     async with pool.acquire() as c:
         meeting_id = await c.fetchval(
             "INSERT INTO meetings"
@@ -204,10 +239,16 @@ async def join(ctx: discord.ApplicationContext):
         )
 
     meeting = Meeting(ctx.guild, channel, meeting_id, session_uid, t0)
-    sink = LiveSink()
-    vc.start_recording(sink, lambda s, *a: None)  # live capture via sink.write; callback unused
+    sink = PcmBuffer()
+
+    client = DAVEVoiceClient(
+        server_id=ctx.guild.id, channel_id=channel.id, user_id=bot.user.id,
+        session_id=session_id, token=token, endpoint=endpoint,
+        on_pcm=lambda uid, pcm: sink.write(uid, pcm),
+    )
+    await client.start()
     task = asyncio.create_task(flusher(ctx.guild.id))
-    active[ctx.guild.id] = (vc, sink, meeting, task)
+    active[ctx.guild.id] = (client, sink, meeting, task)
     await ctx.respond(f"Recording **{channel.name}** → meeting `{meeting_id}`. Speakers tagged by name.")
 
 
@@ -217,16 +258,13 @@ async def leave(ctx: discord.ApplicationContext):
     if not entry:
         await ctx.respond("Not recording here.", ephemeral=True)
         return
-    vc, sink, meeting, task = entry
+    client, sink, meeting, task = entry
     task.cancel()
     await ctx.defer()
-    try:
-        vc.stop_recording()
-    except Exception:
-        pass
+    await client.stop()
+    await ctx.guild.change_voice_state(channel=None)  # leave the channel
     for uid, pcm, t0, t1 in sink.drain_all():
         await store(meeting, uid, pcm, t0, t1)
-    await vc.disconnect()
     async with pool.acquire() as c:
         await c.execute(
             "UPDATE meetings SET status='completed', end_time=now(), updated_at=now() WHERE id=$1",
