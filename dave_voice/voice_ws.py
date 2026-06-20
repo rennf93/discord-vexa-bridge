@@ -20,7 +20,8 @@ _JSON_REPLY_OPS = {int(VoiceOp.DAVE_TRANSITION_READY), int(VoiceOp.DAVE_MLS_INVA
 class VoiceGateway:
     def __init__(self, *, endpoint, server_id, user_id, session_id, token,
                  mls, on_ready, on_session_description, on_speaking,
-                 on_execute=None, on_prepare_passthrough=None):
+                 on_execute=None, on_prepare_passthrough=None,
+                 on_clients_connect=None, on_client_disconnect=None):
         self.endpoint = endpoint
         self.server_id = server_id
         self.user_id = user_id
@@ -32,6 +33,8 @@ class VoiceGateway:
         self.on_speaking = on_speaking
         self.on_execute = on_execute or (lambda tid: None)
         self.on_prepare_passthrough = on_prepare_passthrough or (lambda: None)
+        self.on_clients_connect = on_clients_connect or (lambda user_ids: None)
+        self.on_client_disconnect = on_client_disconnect or (lambda user_id: None)
         self.ws = None
         self.last_seq = 0
         self._hb_nonce = itertools.count(1)
@@ -132,4 +135,8 @@ class VoiceGateway:
             await self.send_json(VoiceOp.DAVE_TRANSITION_READY, {"transition_id": tid})
         elif op == VoiceOp.DAVE_EXECUTE_TRANSITION:
             self.on_execute(d.get("transition_id", 0))
-        # op 6 (ack), 9 (resumed), 11/13 (clients connect/disconnect) -> no-op here
+        elif op == VoiceOp.CLIENTS_CONNECT:
+            self.on_clients_connect([int(u) for u in d.get("user_ids", [])])
+        elif op == VoiceOp.CLIENT_DISCONNECT:
+            self.on_client_disconnect(int(d["user_id"]))
+        # op 6 (ack), 9 (resumed) -> no-op here

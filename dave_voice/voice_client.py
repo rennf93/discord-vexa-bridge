@@ -62,9 +62,24 @@ class DAVEVoiceClient:
         self._sd_evt.set()
 
     def _on_speaking(self, user_id, ssrc):
+        self.mls.recognized_user_ids.add(str(user_id))
         self.ssrc_to_user[ssrc] = user_id
         if self.dave_version >= 1:
             self.mls.refresh_ratchets(self.ssrc_to_user)
+
+    def _on_clients_connect(self, user_ids: list[int]) -> None:
+        for u in user_ids:
+            self.mls.recognized_user_ids.add(str(u))
+        if self.dave_version >= 1:
+            self.mls.refresh_ratchets(self.ssrc_to_user)
+
+    def _on_client_disconnect(self, user_id: int) -> None:
+        self.mls.recognized_user_ids.discard(str(user_id))
+        dead_ssrcs = [ssrc for ssrc, uid in self.ssrc_to_user.items() if uid == user_id]
+        for ssrc in dead_ssrcs:
+            del self.ssrc_to_user[ssrc]
+            self.mls.decryptors.pop(ssrc, None)
+            self.opus.reset(ssrc)
 
     def _on_execute(self, transition_id):
         if self.dave_version >= 1:
@@ -76,6 +91,8 @@ class DAVEVoiceClient:
 
     # ---- receive path (unit-tested core) ----
     def _handle_packet(self, data: bytes) -> None:
+        if self.transport is None:
+            return
         if len(data) < HEADER_LEN + 4:
             return
         pkt = parse_rtp_header(data)
@@ -110,6 +127,8 @@ class DAVEVoiceClient:
             on_ready=self._on_ready, on_session_description=self._on_session_description,
             on_speaking=self._on_speaking, on_execute=self._on_execute,
             on_prepare_passthrough=self._on_prepare_passthrough,
+            on_clients_connect=self._on_clients_connect,
+            on_client_disconnect=self._on_client_disconnect,
         )
         await self._gw.connect()
         await self._ready_evt.wait()

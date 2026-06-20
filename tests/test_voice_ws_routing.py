@@ -99,3 +99,26 @@ async def test_binary_announce_commit_parses_transition_id_and_replies_ready():
     await gw._dispatch(msg, is_binary=True)
     assert ("announce", transition_id, commit_bytes) in gw.mls.calls
     assert ("json", VoiceOp.DAVE_TRANSITION_READY, {"transition_id": transition_id}) in seen["sent"]
+
+
+async def test_clients_connect_and_disconnect_invoke_callbacks():
+    connect_calls: list[list[int]] = []
+    disconnect_calls: list[int] = []
+
+    gw, seen = make_gw()
+    gw.on_clients_connect = lambda user_ids: connect_calls.append(user_ids)
+    gw.on_client_disconnect = lambda user_id: disconnect_calls.append(user_id)
+
+    # op 11 — Clients Connect
+    await gw._dispatch(
+        json.dumps({"op": 11, "d": {"user_ids": ["10", "20"]}}),
+        is_binary=False,
+    )
+    # op 13 — Client Disconnect
+    await gw._dispatch(
+        json.dumps({"op": 13, "d": {"user_id": "10"}}),
+        is_binary=False,
+    )
+
+    assert connect_calls == [[10, 20]]
+    assert disconnect_calls == [10]

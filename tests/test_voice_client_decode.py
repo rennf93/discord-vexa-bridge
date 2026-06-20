@@ -1,5 +1,6 @@
 # tests/test_voice_client_decode.py
 import struct
+import dave
 from dave_voice.voice_client import DAVEVoiceClient
 
 
@@ -16,6 +17,8 @@ class FakeDecryptor:
 class FakeMLS:
     def __init__(self):
         self._d = FakeDecryptor()
+        self.recognized_user_ids: set[str] = set()
+        self.decryptors: dict[int, object] = {}
 
     def decryptor_for(self, ssrc):
         return self._d
@@ -25,8 +28,14 @@ class FakeMLS:
 
 
 class FakeOpus:
+    def __init__(self):
+        self._resets: list[int] = []
+
     def decode(self, ssrc, opus_bytes):
         return b"PCM(" + opus_bytes + b")"
+
+    def reset(self, ssrc: int) -> None:
+        self._resets.append(ssrc)
 
 
 def test_handle_packet_full_chain_emits_pcm_for_known_user():
@@ -89,4 +98,60 @@ def test_handle_packet_none_plaintext_is_dropped():
     c.ssrc_to_user = {0x01020304: 77}
     header = struct.pack(">BBHII", 0x80, 0x78, 1, 2, 0x01020304)
     c._handle_packet(header + b"x" + struct.pack(">I", 1))
+    assert emitted == []
+
+
+# ---- new tests for Finding #2 and #3 ----
+
+def _make_client(dave_version=0):
+    """Return a DAVEVoiceClient with fakes wired in."""
+    c = DAVEVoiceClient(
+        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
+        endpoint="e", on_pcm=lambda uid, pcm: None,
+    )
+    c.mls = FakeMLS()
+    c.opus = FakeOpus()
+    c.dave_version = dave_version
+    return c
+
+
+def test_on_speaking_adds_recognized_user():
+    c = _make_client(dave_version=1)
+    c._on_speaking(77, 1234)
+    assert "77" in c.mls.recognized_user_ids
+    assert c.ssrc_to_user[1234] == 77
+
+
+def test_on_clients_connect_adds_all():
+    c = _make_client(dave_version=1)
+    c._on_clients_connect([10, 20])
+    assert "10" in c.mls.recognized_user_ids
+    assert "20" in c.mls.recognized_user_ids
+
+
+def test_on_client_disconnect_removes_user_and_frees_ssrc():
+    c = _make_client(dave_version=1)
+    c.mls.recognized_user_ids = {"10"}
+    c.ssrc_to_user = {555: 10}
+    # Ensure a decryptor exists for ssrc 555
+    fake_dec = FakeDecryptor()
+    c.mls.decryptors[555] = fake_dec
+
+    c._on_client_disconnect(10)
+
+    assert "10" not in c.mls.recognized_user_ids
+    assert 555 not in c.ssrc_to_user
+    assert 555 not in c.mls.decryptors
+    assert 555 in c.opus._resets
+
+
+def test_handle_packet_drops_when_transport_none():
+    emitted = []
+    c = DAVEVoiceClient(
+        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
+        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+    )
+    # transport is None by default; send a well-formed-ish packet
+    header = struct.pack(">BBHII", 0x80, 0x78, 1, 2, 0x01020304)
+    c._handle_packet(header + b"frame" + struct.pack(">I", 9))
     assert emitted == []
