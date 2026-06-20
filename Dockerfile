@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN pip install --no-cache-dir "py-cord[voice]" asyncpg aiohttp
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py .
+COPY dave_voice ./dave_voice
 CMD ["python", "bot.py"]
