@@ -26,6 +26,7 @@ from collections import defaultdict
 import aiohttp
 import asyncpg
 import discord
+from dave_voice.discord_protocol import DAVEVoiceProtocol
 from dave_voice.voice_client import DAVEVoiceClient
 
 TOKEN          = os.environ["DISCORD_TOKEN"]
@@ -107,27 +108,7 @@ class Meeting:
         return name
 
 
-# guild_id -> asyncio.Future resolved with (token, endpoint)
-_voice_server_waiters: dict[int, asyncio.Future] = {}
-_voice_session_ids: dict[int, str] = {}
-
-
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if member.id == bot.user.id and after.channel is not None:
-        _voice_session_ids[after.channel.guild.id] = after.session_id
-
-
-@bot.event
-async def on_voice_server_update(data):
-    # py-cord fires this raw event with {'guild_id', 'token', 'endpoint'}
-    gid = int(data["guild_id"])
-    fut = _voice_server_waiters.get(gid)
-    if fut and not fut.done():
-        fut.set_result((data["token"], data["endpoint"]))
-
-
-# active: guild_id -> (client, sink, meeting, flusher_task)
+# active: guild_id -> (voice_protocol, client, sink, meeting, flusher_task)
 active: dict[int, tuple] = {}
 
 
@@ -187,7 +168,7 @@ async def flusher(guild_id: int):
             entry = active.get(guild_id)
             if not entry:
                 return
-            _, sink, meeting, _ = entry
+            _, _, sink, meeting, _ = entry
             for uid, pcm, t0, t1 in sink.drain_ready(SILENCE_MS / 1000):
                 asyncio.create_task(store(meeting, uid, pcm, t0, t1))
     except asyncio.CancelledError:
@@ -206,21 +187,21 @@ async def join(ctx: discord.ApplicationContext):
     channel = ctx.author.voice.channel
     await ctx.defer()
 
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future = loop.create_future()
-    _voice_server_waiters[ctx.guild.id] = fut
+    # Register a VoiceProtocol so py-cord routes VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE
+    # to it (it does NOT dispatch them as client events). This sends gateway op 4 and
+    # captures token/endpoint/session_id; DAVEVoiceClient then owns the voice WS/UDP.
     try:
-        await ctx.guild.change_voice_state(channel=channel)  # sends gateway op 4
-        token, endpoint = await asyncio.wait_for(fut, timeout=15)
+        vc: DAVEVoiceProtocol = await channel.connect(cls=DAVEVoiceProtocol, timeout=20)
     except asyncio.TimeoutError:
         await ctx.respond("Timed out connecting to voice. Try again.", ephemeral=True)
         return
-    finally:
-        _voice_server_waiters.pop(ctx.guild.id, None)
+    except discord.ClientException:
+        await ctx.respond("Already connected to voice in this server.", ephemeral=True)
+        return
 
-    session_id = _voice_session_ids.get(ctx.guild.id)
-    if session_id is None:
-        await ctx.respond("Didn't receive a voice session id; try again.", ephemeral=True)
+    if not (vc.token and vc.endpoint and vc.session_id):
+        await vc.disconnect(force=True)
+        await ctx.respond("Didn't receive full voice credentials; try again.", ephemeral=True)
         return
 
     t0 = time.monotonic()
@@ -243,12 +224,22 @@ async def join(ctx: discord.ApplicationContext):
 
     client = DAVEVoiceClient(
         server_id=ctx.guild.id, channel_id=channel.id, user_id=bot.user.id,
-        session_id=session_id, token=token, endpoint=endpoint,
+        session_id=vc.session_id, token=vc.token, endpoint=vc.endpoint,
         on_pcm=lambda uid, pcm: sink.write(uid, pcm),
     )
-    await client.start()
+    try:
+        await client.start()
+    except Exception as e:
+        await vc.disconnect(force=True)
+        async with pool.acquire() as c:
+            await c.execute(
+                "UPDATE meetings SET status='failed', end_time=now(), updated_at=now() WHERE id=$1",
+                meeting_id,
+            )
+        await ctx.respond(f"Failed to start voice receive: {e}", ephemeral=True)
+        return
     task = asyncio.create_task(flusher(ctx.guild.id))
-    active[ctx.guild.id] = (client, sink, meeting, task)
+    active[ctx.guild.id] = (vc, client, sink, meeting, task)
     await ctx.respond(f"Recording **{channel.name}** → meeting `{meeting_id}`. Speakers tagged by name.")
 
 
@@ -258,11 +249,11 @@ async def leave(ctx: discord.ApplicationContext):
     if not entry:
         await ctx.respond("Not recording here.", ephemeral=True)
         return
-    client, sink, meeting, task = entry
+    vc, client, sink, meeting, task = entry
     task.cancel()
     await ctx.defer()
     await client.stop()
-    await ctx.guild.change_voice_state(channel=None)  # leave the channel
+    await vc.disconnect(force=True)  # change_voice_state(None) + cleanup
     for uid, pcm, t0, t1 in sink.drain_all():
         await store(meeting, uid, pcm, t0, t1)
     async with pool.acquire() as c:
