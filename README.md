@@ -38,7 +38,47 @@ Discord voice (DAVE/E2EE)
 
 The downstream is exactly what Vexa's own Zoom/Meet bots use, so Discord calls appear in the
 dashboard, the REST API, and the MCP server without special handling — **provided Vexa knows the
-`discord` platform** (see [Step 2](#step-2--teach-vexa-the-discord-platform)).
+`discord` platform** (see [Step 2](#step-2---teach-vexa-the-discord-platform)).
+
+---
+
+## Who runs this, and where your token lives
+
+**This is self-hosted, bring-your-own-bot software. There is no hosted service and no shared
+bot.** Anyone who wants Discord → Vexa transcripts — the maintainer included — runs **their own
+copy** of this bridge next to **their own Vexa stack**, using **their own Discord bot**. Read
+this before you worry about your token: it never leaves your own infrastructure.
+
+- **You create your own Discord bot and use its token.** There is no "add our bot to your
+  server" invite link to click. Each operator makes a bot in the
+  [Discord Developer Portal](https://discord.com/developers/applications)
+  ([Step 1](#step-1---create-the-discord-bot)); the token it gives you is yours alone.
+- **Your token is runtime configuration — it is never baked into the image and never lives in
+  this repo.** You put it in a gitignored `.env` on your own server, Docker Compose passes it to
+  the container as an environment variable, and `bot.py` reads it from
+  `os.environ["DISCORD_TOKEN"]` at startup. The whole lifecycle stays on your machine:
+
+  ```
+  Discord Developer Portal
+    -> your .env file        (gitignored, stays on your server)
+    -> docker compose environment:
+    -> os.environ["DISCORD_TOKEN"]   (read at runtime, inside your container)
+  ```
+
+- **The published images contain zero secrets.** `ghcr.io/rennf93/discord-vexa-bridge` and
+  `docker.io/renzof93/discord-vexa-bridge` are generic binaries — they are safe to be public
+  precisely *because* the bot token and the database password are supplied per-deployment at
+  runtime, not built in.
+- **Nobody handles anyone else's token.** Your token (and your DB password) are never sent to the
+  maintainer or any third party. At runtime the bot talks only to Discord, to **your** Vexa
+  Postgres, and to **your** Vexa Whisper worker — nothing else.
+- **One bot = one identity = one Vexa.** This bridge is single-bot / single-Vexa by design.
+  Offering it as a shared, multi-server hosted product would be a different (multi-tenant)
+  architecture and is **not** what this repo does.
+
+> **The maintainer is just "operator #1."** To run the bot on their own servers, the maintainer
+> follows the exact same [Quick start](#quick-start) below with their own bot token. There is no
+> privileged, central, or hosted instance — everyone self-hosts identically.
 
 ---
 
@@ -47,7 +87,7 @@ dashboard, the REST API, and the MCP server without special handling — **provi
 - A running **[Vexa](https://github.com/Vexa-ai/vexa)** stack (Postgres + the transcription worker, on a shared Docker network).
 - A **Discord bot** (free — created below).
 - Docker / Docker Compose to run this bridge as one more service on Vexa's network.
-- Vexa must accept `discord` as a platform ([Step 2](#step-2--teach-vexa-the-discord-platform)).
+- Vexa must accept `discord` as a platform ([Step 2](#step-2---teach-vexa-the-discord-platform)).
 
 ---
 
