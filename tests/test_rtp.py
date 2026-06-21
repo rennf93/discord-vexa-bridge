@@ -1,5 +1,6 @@
 import struct
-from dave_voice.rtp import parse_rtp_header, HEADER_LEN
+
+from dave_voice.rtp import HEADER_LEN, parse_rtp_header
 
 
 def test_parse_header_fields():

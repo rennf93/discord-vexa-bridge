@@ -1,16 +1,19 @@
-# ── Add this service to your vexa docker-compose.yml (same indentation as the others),
-#    and put the discord-adapter/ folder (bot.py + Dockerfile) under the repo root
-#    so the build context resolves. Then redeploy the project.
+# ── Add this service to your Vexa docker-compose.yaml (same indentation as the other
+#    services) so the bridge runs on the same network as `postgres` and
+#    `transcription-worker`. Use the prebuilt image, or build from a local checkout.
+#    Keep DISCORD_TOKEN and the DB password in a gitignored .env — never inline secrets.
 
-  discord-adapter:
-    build:
-      context: ./discord-adapter
+  discord-vexa-bridge:
+    image: ghcr.io/rennf93/discord-vexa-bridge:latest
+    # Or build from a local checkout instead of the prebuilt image:
+    # build:
+    #   context: ./discord-vexa-bridge
     environment:
-      DISCORD_TOKEN: "PASTE_YOUR_BOT_TOKEN"
-      DATABASE_URL: postgresql://postgres:change-me-db@postgres:5432/vexa
+      DISCORD_TOKEN: "${DISCORD_TOKEN}"     # from a .env file — do NOT commit the token
+      DATABASE_URL: "${DATABASE_URL:-postgresql://postgres:CHANGE_ME@postgres:5432/vexa}"
       TRANSCRIBE_URL: http://transcription-worker:8000/v1/audio/transcriptions
-      VEXA_USER_ID: "1"          # <- the user id from your create-user curl
-      LANGUAGE: ""               # "" = autodetect (leave blank for it/es/en mixed)
+      VEXA_USER_ID: "1"          # the Vexa user id that owns these meetings
+      LANGUAGE: ""               # "" = autodetect (leave blank for mixed it/es/en)
       SILENCE_MS: "800"          # gap (ms) that ends an utterance
     depends_on: [postgres, transcription-worker]
     networks: [vexa]

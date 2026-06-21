@@ -8,8 +8,11 @@ only if one is registered via `channel.connect(cls=...)`. So we register this
 shim purely to capture the `token`, `endpoint`, and `session_id`; the actual
 voice WebSocket + UDP receive is handled entirely by DAVEVoiceClient.
 """
-import asyncio
 
+import asyncio
+from typing import cast
+
+import discord
 from discord.voice import VoiceProtocol
 
 
@@ -50,11 +53,13 @@ class DAVEVoiceProtocol(VoiceProtocol):
     async def connect(self, *, timeout: float = 20.0, reconnect: bool = True, **kwargs) -> None:
         # Sends gateway op 4; Discord replies with VOICE_STATE_UPDATE + VOICE_SERVER_UPDATE,
         # which the library delivers to the two handlers above (we are now the registered vc).
-        await self.channel.guild.change_voice_state(channel=self.channel)
+        channel = cast(discord.VoiceChannel, self.channel)
+        await channel.guild.change_voice_state(channel=channel)
         await asyncio.wait_for(self._ready.wait(), timeout=timeout)
 
     async def disconnect(self, *, force: bool = False) -> None:
         try:
-            await self.channel.guild.change_voice_state(channel=None)
+            channel = cast(discord.VoiceChannel, self.channel)
+            await channel.guild.change_voice_state(channel=None)
         finally:
             self.cleanup()

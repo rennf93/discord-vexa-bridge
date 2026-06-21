@@ -27,6 +27,7 @@ from collections import defaultdict
 import aiohttp
 import asyncpg
 import discord
+
 from dave_voice.discord_protocol import DAVEVoiceProtocol
 from dave_voice.voice_client import DAVEVoiceClient
 
@@ -35,13 +36,13 @@ from dave_voice.voice_client import DAVEVoiceClient
 # successful frames are plenty for accurate transcripts, so silence the noise.
 logging.getLogger("dave").setLevel(logging.CRITICAL)
 
-TOKEN          = os.environ["DISCORD_TOKEN"]
-DATABASE_URL   = os.environ["DATABASE_URL"]           # postgresql://postgres:pw@postgres:5432/vexa
+TOKEN = os.environ["DISCORD_TOKEN"]
+DATABASE_URL = os.environ["DATABASE_URL"]  # postgresql://postgres:pw@postgres:5432/vexa
 TRANSCRIBE_URL = os.environ.get("TRANSCRIBE_URL", "http://transcription-worker:8000/v1/audio/transcriptions")
-VEXA_USER_ID   = int(os.environ["VEXA_USER_ID"])      # the user id from your create-user curl
-LANGUAGE       = os.environ.get("LANGUAGE", "").strip()        # "" = autodetect
-SILENCE_MS     = int(os.environ.get("SILENCE_MS", "800"))      # gap that ends an utterance
-MIN_MS         = int(os.environ.get("MIN_UTTERANCE_MS", "400"))# drop blips shorter than this
+VEXA_USER_ID = int(os.environ["VEXA_USER_ID"])  # the user id from your create-user curl
+LANGUAGE = os.environ.get("LANGUAGE", "").strip()  # "" = autodetect
+SILENCE_MS = int(os.environ.get("SILENCE_MS", "800"))  # gap that ends an utterance
+MIN_MS = int(os.environ.get("MIN_UTTERANCE_MS", "400"))  # drop blips shorter than this
 
 # Pycord decodes Opus to 48 kHz, 16-bit, stereo PCM in the sink.
 SR, CH, SW = 48_000, 2, 2
@@ -146,7 +147,7 @@ def to_mono_wav(pcm_stereo: bytes) -> bytes:
     The worker hands WAV samples to Whisper assuming 16 kHz, so we must downsample
     here — sending 48 kHz stretches speech 3x and the VAD discards it as non-speech.
     """
-    mono = audioop.tomono(pcm_stereo, SW, 0.5, 0.5)             # 48 kHz stereo -> 48 kHz mono
+    mono = audioop.tomono(pcm_stereo, SW, 0.5, 0.5)  # 48 kHz stereo -> 48 kHz mono
     mono16k, _ = audioop.ratecv(mono, SW, 1, SR, OUT_RATE, None)  # 48 kHz -> 16 kHz
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
@@ -170,8 +171,7 @@ async def transcribe(wav: bytes) -> str:
             form.add_field("language", LANGUAGE)
         try:
             async with aiohttp.ClientSession() as s:
-                async with s.post(TRANSCRIBE_URL, data=form,
-                                  timeout=aiohttp.ClientTimeout(total=120)) as r:
+                async with s.post(TRANSCRIBE_URL, data=form, timeout=aiohttp.ClientTimeout(total=120)) as r:
                     if r.status != 200:
                         print(f"transcribe HTTP {r.status}", flush=True)
                         return ""
@@ -200,8 +200,14 @@ async def store(meeting: Meeting, uid: int, pcm: bytes, t0: float, t1: float):
             "INSERT INTO transcriptions"
             " (meeting_id, start_time, end_time, text, speaker, language, session_uid, segment_id, created_at)"
             " VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())",
-            meeting.id, t0 - meeting.t0, t1 - meeting.t0, text, speaker,
-            (LANGUAGE or None), meeting.session_uid, str(uuid.uuid4()),
+            meeting.id,
+            t0 - meeting.t0,
+            t1 - meeting.t0,
+            text,
+            speaker,
+            (LANGUAGE or None),
+            meeting.session_uid,
+            str(uuid.uuid4()),
         )
     print(f"[{speaker}] {text}", flush=True)
 
@@ -222,14 +228,20 @@ async def flusher(guild_id: int):
 
 @bot.slash_command(description="Join your voice channel and start transcribing")
 async def join(ctx: discord.ApplicationContext):
-    if not ctx.author.voice:
+    guild = ctx.guild
+    author = ctx.author
+    if guild is None or not isinstance(author, discord.Member):
+        await ctx.respond("Use this command in a server.", ephemeral=True)
+        return
+    voice = author.voice
+    if voice is None or voice.channel is None:
         await ctx.respond("Join a voice channel first.", ephemeral=True)
         return
-    if ctx.guild.id in active:
+    if guild.id in active:
         await ctx.respond("Already recording in this server.", ephemeral=True)
         return
 
-    channel = ctx.author.voice.channel
+    channel = voice.channel
     await ctx.defer()
 
     # Register a VoiceProtocol so py-cord routes VOICE_SERVER_UPDATE / VOICE_STATE_UPDATE
@@ -237,7 +249,7 @@ async def join(ctx: discord.ApplicationContext):
     # captures token/endpoint/session_id; DAVEVoiceClient then owns the voice WS/UDP.
     try:
         vc: DAVEVoiceProtocol = await channel.connect(cls=DAVEVoiceProtocol, timeout=20)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         await ctx.respond("Timed out connecting to voice. Try again.", ephemeral=True)
         return
     except discord.ClientException:
@@ -256,20 +268,26 @@ async def join(ctx: discord.ApplicationContext):
             "INSERT INTO meetings"
             " (user_id, platform, platform_specific_id, status, start_time, data, created_at, updated_at)"
             " VALUES ($1,'discord',$2,'active', now(), '{}'::jsonb, now(), now()) RETURNING id",
-            VEXA_USER_ID, str(channel.id),
+            VEXA_USER_ID,
+            str(channel.id),
         )
         await c.execute(
-            "INSERT INTO meeting_sessions (meeting_id, session_uid, session_start_time)"
-            " VALUES ($1,$2, now())",
-            meeting_id, session_uid,
+            "INSERT INTO meeting_sessions (meeting_id, session_uid, session_start_time) VALUES ($1,$2, now())",
+            meeting_id,
+            session_uid,
         )
 
-    meeting = Meeting(ctx.guild, channel, meeting_id, session_uid, t0)
+    meeting = Meeting(guild, channel, meeting_id, session_uid, t0)
     sink = PcmBuffer()
 
+    assert bot.user is not None  # the gateway is connected before any command runs
     client = DAVEVoiceClient(
-        server_id=ctx.guild.id, channel_id=channel.id, user_id=bot.user.id,
-        session_id=vc.session_id, token=vc.token, endpoint=vc.endpoint,
+        server_id=guild.id,
+        channel_id=channel.id,
+        user_id=bot.user.id,
+        session_id=vc.session_id,
+        token=vc.token,
+        endpoint=vc.endpoint,
         on_pcm=lambda uid, pcm: sink.write(uid, pcm),
     )
     try:
@@ -283,14 +301,18 @@ async def join(ctx: discord.ApplicationContext):
             )
         await ctx.respond(f"Failed to start voice receive: {e}", ephemeral=True)
         return
-    task = asyncio.create_task(flusher(ctx.guild.id))
-    active[ctx.guild.id] = (vc, client, sink, meeting, task)
+    task = asyncio.create_task(flusher(guild.id))
+    active[guild.id] = (vc, client, sink, meeting, task)
     await ctx.respond(f"Recording **{channel.name}** → meeting `{meeting_id}`. Speakers tagged by name.")
 
 
 @bot.slash_command(description="Stop transcribing and leave the channel")
 async def leave(ctx: discord.ApplicationContext):
-    entry = active.pop(ctx.guild.id, None)
+    guild = ctx.guild
+    if guild is None:
+        await ctx.respond("Use this command in a server.", ephemeral=True)
+        return
+    entry = active.pop(guild.id, None)
     if not entry:
         await ctx.respond("Not recording here.", ephemeral=True)
         return

@@ -23,8 +23,8 @@ def test_one_decoder_per_ssrc_and_decode():
 
     od = OpusDecoders(decoder_factory=factory)
     out1 = od.decode(111, b"opusA")
-    out2 = od.decode(111, b"opusB")
-    out3 = od.decode(222, b"opusC")
+    od.decode(111, b"opusB")
+    od.decode(222, b"opusC")
     assert out1 == b"\x00\x00\x01\x01"
     assert len(made) == 2  # one per distinct ssrc
     assert made[0].calls == [b"opusA", b"opusB"]

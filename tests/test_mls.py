@@ -1,6 +1,8 @@
 # tests/test_mls.py
 import json
+
 import pytest
+
 import dave_voice.mls as mls_mod
 from dave_voice.mls import MLSManager
 from dave_voice.opcodes import VoiceOp
@@ -61,9 +63,11 @@ def patch_dave(monkeypatch):
     monkeypatch.setattr(mls_mod.dave, "Decryptor", FakeDecryptor)
     # RejectType used in isinstance checks; mirror the real binding (enum.IntEnum)
     import enum
+
     class RejectType(enum.IntEnum):  # noqa
         failed = 0
         ignored = 1
+
     monkeypatch.setattr(mls_mod.dave, "RejectType", RejectType)
 
 
@@ -86,20 +90,26 @@ def test_prepare_epoch_gt1_no_keypackage():
 
 def test_proposals_producing_commit():
     m = MLSManager(self_user_id=42)
-    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    m.set_group_id(999)
+    m.set_version(1)
+    m.on_prepare_epoch(1, 1)
     reply = m.on_proposals(b"adds")
     assert reply == (VoiceOp.DAVE_MLS_COMMIT_WELCOME, b"COMMIT")
 
 
 def test_proposals_no_commit_returns_none():
     m = MLSManager(self_user_id=42)
-    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    m.set_group_id(999)
+    m.set_version(1)
+    m.on_prepare_epoch(1, 1)
     assert m.on_proposals(b"revoke") is None
 
 
 def test_announce_commit_returns_transition_ready_json():
     m = MLSManager(self_user_id=42)
-    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    m.set_group_id(999)
+    m.set_version(1)
+    m.on_prepare_epoch(1, 1)
     op, payload = m.on_announce_commit(transition_id=5, commit=b"C")
     assert op == VoiceOp.DAVE_TRANSITION_READY
     assert json.loads(payload) == {"transition_id": 5}
@@ -107,7 +117,9 @@ def test_announce_commit_returns_transition_ready_json():
 
 def test_refresh_ratchets_assigns_per_ssrc():
     m = MLSManager(self_user_id=42)
-    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    m.set_group_id(999)
+    m.set_version(1)
+    m.on_prepare_epoch(1, 1)
     r = FakeRatchet()
     m.session._ratchets["7"] = r
     m.refresh_ratchets({1234: 7})
@@ -116,7 +128,9 @@ def test_refresh_ratchets_assigns_per_ssrc():
 
 def test_announce_commit_returns_invalid_on_reject():
     m = MLSManager(self_user_id=42)
-    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    m.set_group_id(999)
+    m.set_version(1)
+    m.on_prepare_epoch(1, 1)
     # Override process_commit to return a RejectType instance (failure path)
     m.session.process_commit = lambda commit: mls_mod.dave.RejectType.failed
     op, payload = m.on_announce_commit(transition_id=5, commit=b"C")
@@ -126,7 +140,9 @@ def test_announce_commit_returns_invalid_on_reject():
 
 def test_welcome_none_returns_invalid():
     m = MLSManager(self_user_id=42)
-    m.set_group_id(999); m.set_version(1); m.on_prepare_epoch(1, 1)
+    m.set_group_id(999)
+    m.set_version(1)
+    m.on_prepare_epoch(1, 1)
     # Override process_welcome to return None (failure path)
     m.session.process_welcome = lambda welcome, recognized: None
     op, payload = m.on_welcome(transition_id=8, welcome=b"W")

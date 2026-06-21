@@ -1,0 +1,2 @@
+# Pinned to 3.11 — depends on the stdlib `audioop` module, removed in 3.13.
+3.11

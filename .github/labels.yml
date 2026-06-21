@@ -1,0 +1,36 @@
+- name: voice-receive
+  color: "5865F2"
+  description: DAVE voice receive / dave_voice
+- name: bot
+  color: "1abc9c"
+  description: bot.py control plane / slash commands
+- name: tests
+  color: "0e8a16"
+  description: Test suite
+- name: ci
+  color: "ededed"
+  description: CI / workflows / tooling
+- name: docker
+  color: "2496ed"
+  description: Dockerfile / image / compose
+- name: documentation
+  color: "0075ca"
+  description: README and docs
+- name: bug
+  color: "d73a4a"
+  description: Something isn't working
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or request
+- name: dependencies
+  color: "0366d6"
+  description: Dependency updates
+- name: stale
+  color: "795548"
+  description: Inactive; will be auto-closed
+- name: pinned
+  color: "fef2c0"
+  description: Exempt from stale
+- name: security
+  color: "b60205"
+  description: Security-related

@@ -4,6 +4,7 @@ Root cause guarded: relying on on_ready alone left `pool` None when the Discord
 gateway became ready before Postgres accepted connections, so /join failed with
 'NoneType' object has no attribute 'acquire'. ensure_pool() creates it on demand.
 """
+
 import os
 
 os.environ.setdefault("DISCORD_TOKEN", "x")
@@ -11,6 +12,8 @@ os.environ.setdefault("DATABASE_URL", "postgresql://u:p@h:5432/db")
 os.environ.setdefault("VEXA_USER_ID", "1")
 
 import asyncio  # noqa: E402
+
+import pytest  # noqa: E402
 
 import bot as botmod  # noqa: E402  (importable now that bot.run is __main__-guarded)
 
@@ -64,9 +67,6 @@ async def test_ensure_pool_propagates_db_errors(monkeypatch):
     monkeypatch.setattr(botmod.asyncpg, "create_pool", failing_create_pool)
 
     # A real DB problem surfaces a clear error here, not a later NoneType.
-    try:
+    with pytest.raises(OSError, match="connection refused"):
         await botmod.ensure_pool()
-        assert False, "expected OSError"
-    except OSError as e:
-        assert "connection refused" in str(e)
     assert botmod.pool is None  # not left half-initialized

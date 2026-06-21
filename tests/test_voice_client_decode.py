@@ -1,6 +1,6 @@
 # tests/test_voice_client_decode.py
 import struct
-import dave
+
 from dave_voice.voice_client import DAVEVoiceClient
 
 
@@ -41,8 +41,13 @@ class FakeOpus:
 def test_handle_packet_full_chain_emits_pcm_for_known_user():
     emitted = []
     c = DAVEVoiceClient(
-        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
-        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+        server_id=1,
+        channel_id=2,
+        user_id=3,
+        session_id="s",
+        token="t",
+        endpoint="e",
+        on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
     )
     c.transport = FakeTransport()
     c.mls = FakeMLS()
@@ -65,8 +70,13 @@ def test_handle_packet_full_chain_emits_pcm_for_known_user():
 def test_handle_packet_unknown_ssrc_is_dropped():
     emitted = []
     c = DAVEVoiceClient(
-        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
-        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+        server_id=1,
+        channel_id=2,
+        user_id=3,
+        session_id="s",
+        token="t",
+        endpoint="e",
+        on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
     )
     c.transport = FakeTransport()
     c.mls = FakeMLS()
@@ -80,8 +90,13 @@ def test_handle_packet_unknown_ssrc_is_dropped():
 def test_handle_packet_none_plaintext_is_dropped():
     emitted = []
     c = DAVEVoiceClient(
-        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
-        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+        server_id=1,
+        channel_id=2,
+        user_id=3,
+        session_id="s",
+        token="t",
+        endpoint="e",
+        on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
     )
 
     class NoneDecryptor:
@@ -103,11 +118,17 @@ def test_handle_packet_none_plaintext_is_dropped():
 
 # ---- new tests for Finding #2 and #3 ----
 
+
 def _make_client(dave_version=0):
     """Return a DAVEVoiceClient with fakes wired in."""
     c = DAVEVoiceClient(
-        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
-        endpoint="e", on_pcm=lambda uid, pcm: None,
+        server_id=1,
+        channel_id=2,
+        user_id=3,
+        session_id="s",
+        token="t",
+        endpoint="e",
+        on_pcm=lambda uid, pcm: None,
     )
     c.mls = FakeMLS()
     c.opus = FakeOpus()
@@ -148,8 +169,13 @@ def test_on_client_disconnect_removes_user_and_frees_ssrc():
 def test_handle_packet_drops_when_transport_none():
     emitted = []
     c = DAVEVoiceClient(
-        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
-        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+        server_id=1,
+        channel_id=2,
+        user_id=3,
+        session_id="s",
+        token="t",
+        endpoint="e",
+        on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
     )
     # transport is None by default; send a well-formed-ish packet
     header = struct.pack(">BBHII", 0x80, 0x78, 1, 2, 0x01020304)
@@ -163,8 +189,13 @@ def test_handle_packet_strips_rtp_extension_body_before_dave_decrypt():
     DAVE ciphertext and the AES-GCM tag fails)."""
     emitted = []
     c = DAVEVoiceClient(
-        server_id=1, channel_id=2, user_id=3, session_id="s", token="t",
-        endpoint="e", on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
+        server_id=1,
+        channel_id=2,
+        user_id=3,
+        session_id="s",
+        token="t",
+        endpoint="e",
+        on_pcm=lambda uid, pcm: emitted.append((uid, pcm)),
     )
 
     class IdentityTransport:

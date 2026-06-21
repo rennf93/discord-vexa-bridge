@@ -1,4 +1,5 @@
 """Minimal RTP header parsing for received Discord voice packets."""
+
 import struct
 from dataclasses import dataclass
 

@@ -5,6 +5,7 @@ Pure routing/state logic: methods return (opcode, payload_bytes) reply tuples or
 None; the caller (VoiceGateway) does the actual network send. All RFC-9420 / frame
 crypto lives inside dave.py.
 """
+
 import json
 
 import dave

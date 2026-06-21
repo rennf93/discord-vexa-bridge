@@ -1,0 +1,23 @@
+voice-receive:
+  - changed-files:
+      - any-glob-to-any-file: 'dave_voice/**'
+
+bot:
+  - changed-files:
+      - any-glob-to-any-file: 'bot.py'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: 'tests/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file: '.github/**'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file: ['Dockerfile', 'compose-snippet.yml']
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file: ['**/*.md']

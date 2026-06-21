@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'bot.py'
+      - 'dave_voice/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - '.pre-commit-config.yaml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - run: uv run pre-commit run --all-files
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install uv
+      - run: uv sync --extra dev
+      - name: Run tests
+        run: uv run pytest -v

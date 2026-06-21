@@ -1,9 +1,12 @@
 import os
 import struct
+
 import pytest
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from nacl import bindings
-from dave_voice.transport import TransportCrypto, SUPPORTED_MODES
+
+from dave_voice.transport import SUPPORTED_MODES, TransportCrypto
 
 
 def _rtp_header():
@@ -27,9 +30,7 @@ def test_xchacha20_poly1305_rtpsize_roundtrip():
     plaintext = b"decoded-opus-frame-bytes"
     nonce4 = struct.pack(">I", 9)
     full_nonce = nonce4 + b"\x00" * 20  # value first, then zero pad to 24 bytes
-    ct = bindings.crypto_aead_xchacha20poly1305_ietf_encrypt(
-        plaintext, header, full_nonce, key
-    )
+    ct = bindings.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintext, header, full_nonce, key)
     out = TransportCrypto("aead_xchacha20_poly1305_rtpsize", key).decrypt(header, ct, nonce4)
     assert out == plaintext
 
@@ -40,7 +41,7 @@ def test_wrong_nonce_order_does_not_authenticate():
     header = _rtp_header()
     nonce4 = struct.pack(">I", 7)
     ct = AESGCM(key).encrypt(b"\x00" * 8 + nonce4, b"payload", header)  # wrong order
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         TransportCrypto("aead_aes256_gcm_rtpsize", key).decrypt(header, ct, nonce4)
 
 

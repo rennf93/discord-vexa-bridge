@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Vexa project
+    url: https://github.com/Vexa-ai/vexa
+    about: Issues with Vexa itself (the platform, dashboard, transcription worker, MCP).
+  - name: Security report
+    url: https://github.com/rennf93/discord-vexa-bridge/security/policy
+    about: Report a vulnerability privately — do not open a public issue.
