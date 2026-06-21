@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-06-21
+
 ### Added
 - Initial release: a Discord → Vexa voice-transcription bridge.
 - **DAVE (E2EE) voice receive** implemented from scratch in Python: voice gateway v8 handshake,
