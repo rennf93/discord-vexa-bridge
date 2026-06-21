@@ -9,6 +9,8 @@ on:
       - 'tests/**'
       - 'pyproject.toml'
       - '.pre-commit-config.yaml'
+      - 'Dockerfile'
+      - 'requirements.txt'
       - '.github/workflows/ci.yml'
   pull_request:
     branches: [master]
@@ -37,3 +39,13 @@ jobs:
       - run: uv sync --extra dev
       - name: Run tests
         run: uv run pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build image
+        run: docker build -t discord-vexa-bridge:ci .
+      - name: Smoke test (Python 3.11 + audioop + deps import inside the image)
+        run: |
+          docker run --rm discord-vexa-bridge:ci python -c "import sys; assert sys.version_info[:2] == (3, 11), sys.version; import audioop, discord, dave, asyncpg, aiohttp, nacl; import dave_voice.voice_client; print('image OK', sys.version)"

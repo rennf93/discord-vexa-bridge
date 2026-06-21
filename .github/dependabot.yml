@@ -17,3 +17,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Pinned to Python 3.11 (stdlib audioop removed in 3.13). Only allow patch
+    # bumps of the base image; never minor/major (would break the build).
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
