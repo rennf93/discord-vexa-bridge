@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish-image:
+    name: Build & push the image to GHCR + Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      GHCR: ghcr.io/rennf93         # GitHub Container Registry namespace
+      DOCKERHUB: docker.io/renzof93 # Docker Hub namespace (different username)
+      IMAGE: discord-vexa-bridge
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: renzof93
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Derive version tag
+        id: ver
+        run: |
+          # release → the tag (v0.1.0 → 0.1.0). Any manual dispatch runs against a
+          # branch whose name can contain "/" (e.g. feature/x) — not a valid image
+          # tag — so use the short SHA, which always is one.
+          if [ "${{ github.event_name }}" = "release" ]; then
+            RAW="${{ github.event.release.tag_name }}"
+            VERSION="${RAW#v}"
+          else
+            VERSION="$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
+
+      - name: Build & push
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Build once, tag for both registries at :VERSION and :latest.
+          docker build \
+            -t "${GHCR}/${IMAGE}:${VERSION}" -t "${GHCR}/${IMAGE}:latest" \
+            -t "${DOCKERHUB}/${IMAGE}:${VERSION}" -t "${DOCKERHUB}/${IMAGE}:latest" \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            --label org.opencontainers.image.licenses=MIT \
+            .
+
+          # Push only after the build succeeds, so a failure never half-publishes.
+          for ref in "${GHCR}/${IMAGE}" "${DOCKERHUB}/${IMAGE}"; do
+            docker push "${ref}:${VERSION}"
+            docker push "${ref}:latest"
+          done
+
+          echo "Published ${IMAGE} to GHCR + Docker Hub at :${VERSION} and :latest"

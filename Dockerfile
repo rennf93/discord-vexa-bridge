@@ -1,5 +1,6 @@
-# py3.11: audioop is still present here (removed in 3.13).
-FROM python:3.14-slim
+# Pinned to 3.11: the bot uses the stdlib `audioop` module, removed in 3.13.
+# Do NOT bump past 3.11 (dependabot is configured to skip minor/major python bumps).
+FROM python:3.11-slim
 
 # libopus is needed to DECODE incoming Discord voice.
 RUN apt-get update && apt-get install -y --no-install-recommends libopus0 \

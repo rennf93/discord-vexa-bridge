@@ -1,7 +1,7 @@
 # discord-vexa-bridge
 
 [![CI](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/ci.yml)
-[![Container Release](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/container-release.yml/badge.svg)](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/container-release.yml)
+[![Release](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/release.yml/badge.svg)](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 
