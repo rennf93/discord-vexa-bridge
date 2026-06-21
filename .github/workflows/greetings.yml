@@ -12,10 +12,10 @@ jobs:
     steps:
       - uses: actions/first-interaction@v3
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-message: >
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          issue_message: >
             Thanks for opening your first issue on discord-vexa-bridge! A maintainer will take a look.
             If it's about transcripts not appearing, please confirm Vexa accepts the `discord`
             platform (see Step 2 in the README).
-          pr-message: >
+          pr_message: >
             Thanks for your first pull request! Please make sure `make lint` and `make test` pass.
