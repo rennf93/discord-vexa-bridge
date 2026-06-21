@@ -1,4 +1,5 @@
 """Voice WebSocket gateway v8: lifecycle, heartbeat+seq_ack, and opcode routing."""
+
 import asyncio
 import itertools
 import json
@@ -18,11 +19,24 @@ _JSON_REPLY_OPS = {int(VoiceOp.DAVE_TRANSITION_READY), int(VoiceOp.DAVE_MLS_INVA
 
 
 class VoiceGateway:
-    def __init__(self, *, endpoint, server_id, user_id, session_id, token,
-                 mls, on_ready, on_session_description, on_speaking,
-                 on_execute=None, on_prepare_passthrough=None,
-                 on_clients_connect=None, on_client_disconnect=None,
-                 on_mls_change=None):
+    def __init__(
+        self,
+        *,
+        endpoint,
+        server_id,
+        user_id,
+        session_id,
+        token,
+        mls,
+        on_ready,
+        on_session_description,
+        on_speaking,
+        on_execute=None,
+        on_prepare_passthrough=None,
+        on_clients_connect=None,
+        on_client_disconnect=None,
+        on_mls_change=None,
+    ):
         self.endpoint = endpoint
         self.server_id = server_id
         self.user_id = user_id
@@ -46,13 +60,16 @@ class VoiceGateway:
     async def connect(self):
         url = f"wss://{self.endpoint}?v=8"
         self.ws = await websockets.connect(url, max_size=None)
-        await self.send_json(VoiceOp.IDENTIFY, {
-            "server_id": str(self.server_id),
-            "user_id": str(self.user_id),
-            "session_id": self.session_id,
-            "token": self.token,
-            "max_dave_protocol_version": dave.get_max_supported_protocol_version(),
-        })
+        await self.send_json(
+            VoiceOp.IDENTIFY,
+            {
+                "server_id": str(self.server_id),
+                "user_id": str(self.user_id),
+                "session_id": self.session_id,
+                "token": self.token,
+                "max_dave_protocol_version": dave.get_max_supported_protocol_version(),
+            },
+        )
         self._recv_task = asyncio.create_task(self._recv_loop())
 
     async def close(self):
@@ -80,10 +97,13 @@ class VoiceGateway:
         try:
             while True:
                 await asyncio.sleep(interval_ms / 1000)
-                await self.send_json(VoiceOp.HEARTBEAT, {
-                    "t": next(self._hb_nonce),
-                    "seq_ack": self.last_seq,
-                })
+                await self.send_json(
+                    VoiceOp.HEARTBEAT,
+                    {
+                        "t": next(self._hb_nonce),
+                        "seq_ack": self.last_seq,
+                    },
+                )
         except asyncio.CancelledError:
             pass
 

@@ -11,6 +11,7 @@ Layout (verified against py-cord's own receive path, discord/voice/receive/reade
     packet). Discord puts these 4 bytes FIRST in the cipher nonce, then zero-pads to
     the cipher's nonce length (12 for AES-GCM, 24 for XChaCha20-Poly1305).
 """
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from nacl import bindings
 
@@ -33,6 +34,4 @@ class TransportCrypto:
             full_nonce = nonce + b"\x00" * 8  # 12-byte GCM nonce, value first
             return AESGCM(self.key).decrypt(full_nonce, ciphertext, header)
         full_nonce = nonce + b"\x00" * 20  # 24-byte XChaCha nonce, value first
-        return bindings.crypto_aead_xchacha20poly1305_ietf_decrypt(
-            ciphertext, header, full_nonce, self.key
-        )
+        return bindings.crypto_aead_xchacha20poly1305_ietf_decrypt(ciphertext, header, full_nonce, self.key)

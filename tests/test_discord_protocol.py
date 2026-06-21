@@ -5,6 +5,7 @@ to the guild's *registered VoiceProtocol* (vc.on_voice_server_update / on_voice_
 NOT as client-level @bot.event handlers. DAVEVoiceProtocol is that registered protocol,
 captures the handshake credentials, and resolves once both arrive.
 """
+
 import asyncio
 
 import pytest

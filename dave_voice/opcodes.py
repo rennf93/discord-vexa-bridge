@@ -1,4 +1,5 @@
 """Voice gateway opcodes and binary frame (de)framing for DAVE."""
+
 import struct
 from enum import IntEnum
 

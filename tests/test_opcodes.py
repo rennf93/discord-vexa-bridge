@@ -1,5 +1,6 @@
 import struct
-from dave_voice.opcodes import VoiceOp, BINARY_SERVER_OPS, decode_binary, encode_binary
+
+from dave_voice.opcodes import BINARY_SERVER_OPS, VoiceOp, decode_binary, encode_binary
 
 
 def test_opcode_values():

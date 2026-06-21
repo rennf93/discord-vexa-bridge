@@ -1,4 +1,5 @@
 import struct
+
 from dave_voice.ip_discovery import build_request, parse_response
 
 

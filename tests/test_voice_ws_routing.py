@@ -1,9 +1,9 @@
 # tests/test_voice_ws_routing.py
 import json
 import struct
-import pytest
-from dave_voice.voice_ws import VoiceGateway
+
 from dave_voice.opcodes import VoiceOp
+from dave_voice.voice_ws import VoiceGateway
 
 
 class FakeMLS:
@@ -37,7 +37,11 @@ class FakeMLS:
 def make_gw():
     seen = {"ready": None, "sd": None, "speaking": [], "sent": [], "mls_change": 0}
     gw = VoiceGateway(
-        endpoint="x", server_id=1, user_id=2, session_id="s", token="t",
+        endpoint="x",
+        server_id=1,
+        user_id=2,
+        session_id="s",
+        token="t",
         mls=FakeMLS(),
         on_ready=lambda d: seen.__setitem__("ready", d),
         on_session_description=lambda d: seen.__setitem__("sd", d),
@@ -58,8 +62,14 @@ def make_gw():
 
 async def test_ready_and_session_description_and_speaking():
     gw, seen = make_gw()
-    await gw._dispatch(json.dumps({"op": 2, "d": {"ssrc": 9, "ip": "1.2.3.4", "port": 50, "modes": ["aead_aes256_gcm_rtpsize"]}}), is_binary=False)
-    await gw._dispatch(json.dumps({"op": 4, "d": {"secret_key": [0], "mode": "aead_aes256_gcm_rtpsize", "dave_protocol_version": 1}}), is_binary=False)
+    await gw._dispatch(
+        json.dumps({"op": 2, "d": {"ssrc": 9, "ip": "1.2.3.4", "port": 50, "modes": ["aead_aes256_gcm_rtpsize"]}}),
+        is_binary=False,
+    )
+    await gw._dispatch(
+        json.dumps({"op": 4, "d": {"secret_key": [0], "mode": "aead_aes256_gcm_rtpsize", "dave_protocol_version": 1}}),
+        is_binary=False,
+    )
     await gw._dispatch(json.dumps({"op": 5, "d": {"user_id": "77", "ssrc": 9}}), is_binary=False)
     assert seen["ready"]["ssrc"] == 9
     assert seen["sd"]["dave_protocol_version"] == 1

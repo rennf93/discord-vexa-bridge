@@ -1,4 +1,5 @@
 """Discord UDP IP discovery (find our public ip/port for Select Protocol)."""
+
 import struct
 
 

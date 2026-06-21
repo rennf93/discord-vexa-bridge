@@ -1,5 +1,6 @@
 # dave_voice/voice_client.py
 """Top-level DAVE voice receive client: assembles WS + UDP + transport + MLS + opus."""
+
 import asyncio
 import socket
 
@@ -8,8 +9,8 @@ import dave
 from dave_voice import ip_discovery
 from dave_voice.mls import MLSManager
 from dave_voice.opus_decode import OpusDecoders
-from dave_voice.rtp import parse_rtp_header, HEADER_LEN
-from dave_voice.transport import TransportCrypto, SUPPORTED_MODES
+from dave_voice.rtp import HEADER_LEN, parse_rtp_header
+from dave_voice.transport import SUPPORTED_MODES, TransportCrypto
 from dave_voice.udp_receiver import VoiceUDPProtocol
 from dave_voice.voice_ws import VoiceGateway
 
@@ -17,8 +18,7 @@ _EXT_FLAG = 0x10  # version_flags bit indicating an RTP header extension
 
 
 class DAVEVoiceClient:
-    def __init__(self, *, server_id, channel_id, user_id, session_id, token,
-                 endpoint, on_pcm):
+    def __init__(self, *, server_id, channel_id, user_id, session_id, token, endpoint, on_pcm):
         self.server_id = server_id
         self.channel_id = channel_id
         self.user_id = user_id
@@ -113,7 +113,7 @@ class DAVEVoiceClient:
         cc = pkt.version_flags & 0x0F
         extended = bool(pkt.version_flags & _EXT_FLAG)
         header = data[:HEADER_LEN]
-        payload = data[HEADER_LEN + cc * 4:]
+        payload = data[HEADER_LEN + cc * 4 :]
         if len(payload) < 4:
             return
         nonce = payload[-4:]
@@ -151,10 +151,16 @@ class DAVEVoiceClient:
     # ---- lifecycle ----
     async def start(self):
         self._gw = VoiceGateway(
-            endpoint=self.endpoint, server_id=self.server_id, user_id=self.user_id,
-            session_id=self.session_id, token=self.token, mls=self.mls,
-            on_ready=self._on_ready, on_session_description=self._on_session_description,
-            on_speaking=self._on_speaking, on_execute=self._on_execute,
+            endpoint=self.endpoint,
+            server_id=self.server_id,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            token=self.token,
+            mls=self.mls,
+            on_ready=self._on_ready,
+            on_session_description=self._on_session_description,
+            on_speaking=self._on_speaking,
+            on_execute=self._on_execute,
             on_prepare_passthrough=self._on_prepare_passthrough,
             on_clients_connect=self._on_clients_connect,
             on_client_disconnect=self._on_client_disconnect,
@@ -172,10 +178,13 @@ class DAVEVoiceClient:
         resp = await loop.sock_recv(self._sock, 74)
         my_ip, my_port = ip_discovery.parse_response(resp)
 
-        await self._gw.send_json(1, {  # Select Protocol
-            "protocol": "udp",
-            "data": {"address": my_ip, "port": my_port, "mode": self._chosen_mode},
-        })
+        await self._gw.send_json(
+            1,
+            {  # Select Protocol
+                "protocol": "udp",
+                "data": {"address": my_ip, "port": my_port, "mode": self._chosen_mode},
+            },
+        )
         await self._sd_evt.wait()
 
         # Hand the connected socket to an asyncio datagram endpoint for receive.
