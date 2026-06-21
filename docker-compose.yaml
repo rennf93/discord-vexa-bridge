@@ -1,0 +1,251 @@
+# ============================================================================
+# Vexa — single-file compose for the UGREEN Docker "Project" UI
+# Storage path: select the vexa repo root (/volume1/vexa) — the transcription
+# build context resolves against it. Paste whole file, set storage path, Deploy.
+#
+# Reviewed against live runtime logs. Services: postgres, redis, minio,
+# transcription-worker (CPU), admin-api, runtime-api, meeting-api, mcp,
+# api-gateway, dashboard. Schema self-syncs on boot (no init sidecar needed).
+# Dropped vs upstream: tts, agent-api, calendar, telegram.
+# Change the change-me-* secrets if you like. No .env — all values inlined.
+# ============================================================================
+
+services:
+
+  # ---- infra ----
+  redis:
+    image: redis:7.0-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    volumes: [redis-data:/data]
+    networks: [vexa]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: vexa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5458:5432"   # for psql / schema inspection
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vexa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    networks: [vexa]
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: vexa-access-key
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9100:9000"   # remapped off your existing MinIO (9000/9001)
+      - "127.0.0.1:9101:9001"
+    volumes: [minio-data:/data]
+    networks: [vexa]
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: ["/bin/sh", "-c", "sleep 5 && mc alias set v http://minio:9000 vexa-access-key ${MINIO_ROOT_PASSWORD} && mc mb --ignore-existing v/vexa; exit 0"]
+    networks: [vexa]
+    restart: "no"
+
+  # ---- transcription: the ONLY build. CPU faster-whisper, no nginx, no GPU. ----
+  # First boot downloads large-v3-turbo from HuggingFace into the volume (once).
+  # If the UI refuses to build, run once over SSH then redeploy:
+  #   docker build -t vexa-transcription:cpu -f services/transcription-service/Dockerfile.cpu services/transcription-service
+  transcription-worker:
+    image: vexa-transcription:cpu
+    build:
+      context: ./services/transcription-service
+      dockerfile: Dockerfile.cpu
+    environment:
+      WORKER_ID: "1"
+      MODEL_SIZE: large-v3-turbo   # drop to medium/small if the i5 lags
+      DEVICE: cpu
+      COMPUTE_TYPE: int8
+      CPU_THREADS: "0"             # 0 = auto
+    ports:
+      - "127.0.0.1:8083:8000"      # curl http://localhost:8083/health to verify
+    volumes: [whisper-models:/app/models]
+    networks: [vexa]
+    restart: unless-stopped
+
+  # ---- core services ----
+  admin-api:
+    image: vexaai/admin-api:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vexa
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SSL_MODE: disable
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+    ports:
+      - "127.0.0.1:8057:8001"
+    networks: [vexa]
+    restart: unless-stopped
+
+  runtime-api:
+    image: vexaai/runtime-api:latest
+    group_add: ["121"]            # your docker GID (from the make output)
+    depends_on: [redis, postgres]
+    environment:
+      DOCKER_NETWORK: vexa_net    # bots spawn onto this network — must match the network name below
+      AGENT_IMAGE: vexaai/vexa-bot:latest
+      BROWSER_IMAGE: vexaai/vexa-bot:latest
+      REDIS_URL: redis://redis:6379
+      TRANSCRIPTION_SERVICE_URL: http://transcription-worker:8000/v1/audio/transcriptions
+      TRANSCRIPTION_SERVICE_TOKEN: local-dev
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: vexa-access-key
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: vexa
+      BOT_API_TOKEN: ${ADMIN_API_TOKEN}
+      API_KEYS: ${ADMIN_API_TOKEN}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vexa
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SSL_MODE: disable
+      ALLOW_PRIVATE_CALLBACKS: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # profiles.yaml mount removed — image ships its own
+    init: true
+    networks: [vexa]
+    restart: unless-stopped
+
+  meeting-api:
+    image: vexaai/meeting-api:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      runtime-api:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vexa
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_SSL_MODE: disable
+      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ADMIN_TOKEN: ${ADMIN_API_TOKEN}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      RUNTIME_API_URL: http://runtime-api:8090
+      RUNTIME_API_TOKEN: ${BOT_API_TOKEN}
+      MEETING_API_URL: http://meeting-api:8080
+      BOT_IMAGE_NAME: vexaai/vexa-bot:latest
+      DOCKER_NETWORK: vexa_net
+      POST_MEETING_HOOKS: ""
+      TRANSCRIPTION_COLLECTOR_URL: http://meeting-api:8080
+      RECORDING_ENABLED: "true"
+      CAPTURE_MODES: audio
+      STORAGE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: vexa-access-key
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET: vexa
+      MINIO_SECURE: "false"
+      TRANSCRIPTION_SERVICE_URL: http://transcription-worker:8000/v1/audio/transcriptions
+      TRANSCRIPTION_SERVICE_TOKEN: local-dev
+    init: true
+    networks: [vexa]
+    restart: unless-stopped
+
+  # ---- MCP server: the surface Claude / RoboCo agents read meeting data through ----
+  mcp:
+    image: vexaai/mcp:latest
+    depends_on: [api-gateway]
+    environment:
+      API_GATEWAY_URL: http://api-gateway:8000
+    ports:
+      - "18888:18888"            # point Claude / RoboCo here: http://<nas-ip>:18888
+    init: true
+    networks: [vexa]
+    restart: unless-stopped
+
+  api-gateway:
+    image: vexaai/api-gateway:latest
+    depends_on:
+      admin-api:
+        condition: service_started
+      meeting-api:
+        condition: service_started
+      redis:
+        condition: service_started
+    environment:
+      ADMIN_API_URL: http://admin-api:8001
+      MEETING_API_URL: http://meeting-api:8080
+      TRANSCRIPTION_COLLECTOR_URL: http://meeting-api:8080
+      MCP_URL: http://mcp:18888         # required env — was the crash
+      REDIS_URL: redis://redis:6379/0
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      CORS_ORIGINS: "*"
+    ports:
+      - "8056:8000"              # main REST + WebSocket API
+    init: true
+    networks: [vexa]
+    restart: unless-stopped
+
+  discord-adapter:
+    image: renzof93/discord-vexa-bridge:latest
+    depends_on: [postgres, transcription-worker]
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      DATABASE_URL: ${DATABASE_URL}
+      TRANSCRIBE_URL: http://transcription-worker:8000/v1/audio/transcriptions
+      VEXA_USER_ID: "1"          # <- the user id from your create-user curl
+      LANGUAGE: ""               # "" = autodetect (leave blank for it/es/en mixed)
+      SILENCE_MS: "800"          # gap (ms) that ends an utterance
+    networks: [vexa]
+    restart: unless-stopped
+
+  dashboard:
+    image: vexaai/dashboard:latest
+    depends_on: [api-gateway]
+    environment:
+      VEXA_API_URL: http://api-gateway:8000
+      VEXA_PUBLIC_API_URL: http://192.168.50.111:8056
+      VEXA_ADMIN_API_URL: http://admin-api:8001
+      VEXA_ADMIN_API_KEY: ${VEXA_ADMIN_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      VEXA_ALLOW_DIRECT_LOGIN: "true"
+    ports:
+      - "3001:3000"             # the UI
+    init: true
+    networks: [vexa]
+    restart: unless-stopped
+
+networks:
+  vexa:
+    name: vexa_net              # fixed name so runtime-api's DOCKER_NETWORK matches
+
+volumes:
+  redis-data:
+  postgres-data:
+  minio-data:
+  whisper-models:
