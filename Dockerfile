@@ -1,5 +1,5 @@
 # py3.11: audioop is still present here (removed in 3.13).
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # libopus is needed to DECODE incoming Discord voice.
 RUN apt-get update && apt-get install -y --no-install-recommends libopus0 \
