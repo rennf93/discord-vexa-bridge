@@ -104,7 +104,7 @@ async def test_run_once_summarizes_writes_note_and_marks_done(tmp_path, monkeypa
     assert result.summarized == 1
     assert len(created) == 1
     path, content = created[0]
-    assert path == "Meetings/2026-07-06 — David & Renzo (13:20).md"
+    assert path == "Meetings/2026-07-06 — David & Renzo (13-20).md"
     assert content.startswith("---\n")
     assert "## TL;DR" in content
     # state marked done

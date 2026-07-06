@@ -57,9 +57,13 @@ def _render_transcript(transcript: list[Utterance]) -> str:
 
 
 def note_path(meeting: Meeting, speakers: list[str], cfg: Config) -> str:
-    """{folder}/{YYYY-MM-DD} — {sorted participants joined by ' & '} ({HH:MM}).md"""
+    """{folder}/{YYYY-MM-DD} — {sorted participants joined by ' & '} ({HH-MM}).md
+
+    The time uses HH-MM, not HH:MM — Obsidian filenames cannot contain ':'
+    (vault-as-mcp rejects '\\ / :' in the filename portion of `path`).
+    """
     date = meeting.start.strftime("%Y-%m-%d")
-    time = meeting.start.strftime("%H:%M")
+    time = meeting.start.strftime("%H-%M")
     participants = " & ".join(sorted(set(speakers)))
     return f"{cfg.obsidian_note_folder}/{date} — {participants} ({time}).md"
 
@@ -82,12 +86,33 @@ async def create_note(cfg: Config, path: str, content: str) -> None:
     if status != 200:
         raise ObsidianError(f"Obsidian MCP returned HTTP {status}: {text[:200]}")
     payload: dict[str, Any] = _safe_json(text)
-    if "error" in payload:
-        msg = str(payload["error"].get("message", payload["error"]))
+    msg = _payload_error_text(payload)
+    if msg is not None:
         if "exist" in msg.lower():
             return  # idempotent backstop — note is already there
         raise ObsidianError(msg)
     return
+
+
+def _payload_error_text(payload: dict[str, Any]) -> str | None:
+    """Pull an error message out of a JSON-RPC response, or None on success.
+
+    Two failure shapes to honor:
+    - top-level {"error": {"message": ...}} (JSON-RPC level)
+    - {"result": {"isError": true, "content": [{"type":"text","text":...}]}} (tool-execution
+      failure returned with HTTP 200 — e.g. "File name cannot contain ... \\/:" or
+      "File already exists"). Without this, tool failures are silently swallowed.
+    """
+    err = payload.get("error")
+    if isinstance(err, dict):
+        return str(err.get("message", err))
+    result = payload.get("result")
+    if isinstance(result, dict) and result.get("isError"):
+        for item in result.get("content", []):
+            if isinstance(item, dict) and item.get("type") == "text":
+                return str(item.get("text", ""))
+        return str(result)
+    return None
 
 
 def _safe_json(text: str) -> dict[str, Any]:

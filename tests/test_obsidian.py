@@ -22,7 +22,9 @@ def test_note_path_scheme():
     start = datetime(2026, 7, 6, 13, 20, tzinfo=UTC)
     m = _meeting(start)
     path = obsidian.note_path(m, ["Renzo", "David"], _cfg())
-    assert path == "Meetings/2026-07-06 — David & Renzo (13:20).md"
+    # HH-MM, not HH:MM — Obsidian filenames cannot contain ':'
+    assert path == "Meetings/2026-07-06 — David & Renzo (13-20).md"
+    assert ":" not in path
 
 
 def test_note_path_participants_sorted_unique_joined_with_amp():
@@ -87,6 +89,39 @@ async def test_create_note_other_error_raises(monkeypatch):
     monkeypatch.setattr(obsidian, "_http_post", fake_post)
     with pytest.raises(obsidian.ObsidianError, match="permission denied"):
         await obsidian.create_note(_cfg(), "Meetings/x.md", "# content")
+
+
+async def test_create_note_tool_execution_failure_iserror_raises(monkeypatch):
+    """HTTP 200 + result.isError=true (tool-execution failure) must raise, not be swallowed."""
+
+    async def fake_post(url, headers, body):
+        # Real shape returned by vault-as-mcp for an illegal filename char.
+        return (
+            200,
+            '{"jsonrpc":"2.0","id":1,"result":{"content":['
+            '{"type":"text","text":"Tool execution failed: File name cannot contain '
+            'any of the following characters: \\\\ / :"}],"isError":true}}',
+        )
+
+    monkeypatch.setattr(obsidian, "_http_post", fake_post)
+    with pytest.raises(obsidian.ObsidianError, match="File name cannot contain"):
+        await obsidian.create_note(_cfg(), "Meetings/x.md", "# content")
+
+
+async def test_create_note_iserror_file_exists_is_success(monkeypatch):
+    """'File already exists' surfaces as result.isError — still the idempotent backstop."""
+
+    async def fake_post(url, headers, body):
+        return (
+            200,
+            '{"jsonrpc":"2.0","id":1,"result":{"content":['
+            '{"type":"text","text":"Tool execution failed: File already exists: Meetings/x.md"}'
+            '],"isError":true}}',
+        )
+
+    monkeypatch.setattr(obsidian, "_http_post", fake_post)
+    # must not raise — exists is the crash-recovery backstop
+    await obsidian.create_note(_cfg(), "Meetings/x.md", "# content")
 
 
 async def test_create_note_http_500_raises(monkeypatch):

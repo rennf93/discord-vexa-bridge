@@ -47,9 +47,11 @@
         <string>true</string>
 
         <key>AI_MODEL</key>
-        <string>anthropic/claude-sonnet-5</string>
+        <string>openai/glm-5.2:cloud</string>
         <key>AI_API_KEY</key>
-        <string>REPLACE_ME</string>
+        <string>not-needed</string>
+        <key>AI_BASE_URL</key>
+        <string>http://localhost:11434/v1</string>
 
         <key>VEXA_API_URL</key>
         <string>http://192.168.50.111:8056</string>

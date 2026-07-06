@@ -1,11 +1,13 @@
 """Tests for summarizer.vexa — read Vexa meetings/transcripts, write notes. HTTP faked.
 
-The Vexa api-gateway shapes assumed here (verify against the live API on first real run):
+The Vexa api-gateway shapes (verified against the live API):
 - GET /meetings -> {"meetings":[{id, platform, platform_specific_id, start_time, end_time, status}, ...]}
   (a bare list is also accepted)
-- GET /transcripts/{platform}/{native_meeting_id} -> {"transcripts":[{speaker, start_time, end_time, text}, ...]}
+- GET /transcripts/{platform}/{native_meeting_id} -> a meeting object with a "segments" array;
+  each segment has {start, end, text, speaker} (second offsets). An older {"transcripts":[...]}
+  shape with start_time/end_time is also accepted for compat.
 - PATCH /meetings/{platform}/{native_meeting_id} body {"data":{"notes": <md>}}
-start_time / end_time are epoch seconds (float). X-API-Key header auth.
+start_time / end_time are ISO-8601 strings (epoch-second floats also accepted). X-API-Key header auth.
 """
 
 from datetime import UTC
@@ -91,6 +93,33 @@ async def test_list_accepts_bare_list_response(monkeypatch):
     assert [m.id for m in meetings] == [9]
 
 
+async def test_list_parses_iso_start_time_strings(monkeypatch):
+    """Live api-gateway returns start_time/end_time as ISO-8601 strings, not epoch seconds."""
+    payload = {
+        "meetings": [
+            {
+                "id": 1,
+                "platform": "discord",
+                "platform_specific_id": "d1",
+                "start_time": "2026-07-06T13:20:08.031143",
+                "end_time": "2026-07-06T14:03:27.060312",
+                "status": "completed",
+            }
+        ]
+    }
+
+    async def fake_get(url, headers):
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    meetings = await vexa.list_completed_meetings(_cfg(), ["discord"])
+    m1 = meetings[0]
+    assert m1.start.tzinfo == UTC
+    assert m1.start.year == 2026 and m1.start.month == 7 and m1.start.day == 6
+    assert m1.start.hour == 13 and m1.start.minute == 20
+    assert m1.end.minute == 3  # 14:03
+
+
 async def test_list_falls_back_to_per_meeting_detail_when_native_id_missing(monkeypatch):
     """If the list response omits platform_specific_id, fetch GET /meetings/{id} for it."""
     list_payload = {
@@ -168,6 +197,42 @@ async def test_get_transcript_accepts_bare_list(monkeypatch):
     )
     utts = await vexa.get_transcript(_cfg(), m)
     assert len(utts) == 1 and utts[0].text == "hi"
+
+
+async def test_get_transcript_reads_segments_shape(monkeypatch):
+    """Live api-gateway shape: a meeting object with a 'segments' array (start/end offsets)."""
+    payload = {
+        "id": 1,
+        "platform": "discord",
+        "native_meeting_id": "d1",
+        "status": "completed",
+        "segments": [
+            {"speaker": "Renzo", "start": 18.1, "end": 19.6, "text": "I've heard, yeah."},
+            {"speaker": "David Freire", "start": 1.0, "end": 3.6, "text": "Okay."},
+            {"speaker": "David Freire", "start": 40.1, "end": 53.1, "text": "This is cool..."},
+        ],
+    }
+
+    async def fake_get(url, headers):
+        assert url == "http://vexa:8056/transcripts/discord/d1"
+        return 200, payload
+
+    monkeypatch.setattr(vexa, "_http_get_json", fake_get)
+    from datetime import datetime as _dt
+
+    from summarizer.types import Meeting
+
+    m = Meeting(
+        id=1,
+        platform="discord",
+        native_meeting_id="d1",
+        start=_dt.fromtimestamp(1000.0, tz=UTC),
+        end=_dt.fromtimestamp(1100.0, tz=UTC),
+    )
+    utts = await vexa.get_transcript(_cfg(), m)
+    assert [u.text for u in utts] == ["Okay.", "I've heard, yeah.", "This is cool..."]
+    assert utts[0].speaker == "David Freire"
+    assert utts[0].start_time == 1.0 and utts[0].end_time == 3.6
 
 
 async def test_write_notes_patches_with_data_notes(monkeypatch):
