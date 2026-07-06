@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-06
+
+### Fixed
+- **No more lost audio when the transcription worker is busy.** Segments now spill to a
+  durable on-disk queue and a single background drainer replays them one at a time,
+  matching the worker's single-concurrency. Previously a 503 (or a bot restart) discarded
+  the PCM, so a long call could yield only a handful of transcript rows.
+- Transcribe timeout raised 120s → 600s (`TRANSCRIBE_TIMEOUT`): the CPU Whisper worker
+  holds a connection for minutes per clip; 120s was killing even accepted jobs.
+
+### Changed
+- `/leave` marks the meeting `completed` only after the pending queue has drained (not
+  inline), so anything reacting to `completed` (summaries, webhooks) sees every utterance.
+
+### Added
+- `PENDING_DIR` env (default `/data/pending`) and a `discord-pending` compose volume for
+  the durable queue — survives 503s and bot restarts; the drainer recovers crash-left
+  segments on boot.
+
 ## [0.1.0] - 2026-06-21
 
 ### Added
