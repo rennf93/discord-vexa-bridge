@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-07
+
+### Fixed
+- **The Obsidian sink actually writes notes.** Two silent-failure bugs in
+  `summarizer/obsidian.py` had the summarizer report success while writing nothing to
+  the vault:
+  - `note_path` used `(HH:MM)`; Obsidian filenames cannot contain `:`, so `vault-as-mcp`
+    rejected the path with a tool-execution error. Now `(HH-MM)`.
+  - `create_note` checked only the top-level JSON-RPC `error`, not `result.isError`, so
+    HTTP-200 + `isError:true` tool failures were swallowed. Now honors both shapes;
+    "File already exists" still trips the idempotent crash-recovery backstop.
+- **Live Vexa API shapes.** `summarizer/vexa.py` now parses what the api-gateway actually
+  returns: ISO-8601 `start_time`/`end_time` strings (it assumed epoch seconds) and the
+  `{"segments":[{start,end,text,speaker}]}` transcript shape (it expected
+  `{"transcripts":[...]}`). Verified against the running NAS stack.
+
+### Changed
+- **LLM routed through the local ollama proxy.** Defaults switched to
+  `openai/glm-5.2:cloud` at `http://localhost:11434/v1` — the proxy's OpenAI endpoint
+  serves the `:cloud` models with no auth. Plain `ollama/*` ids hit `/api/generate`, and
+  the local raw models have no template (`does not support chat`); only the `:cloud`
+  models work. Updated `summarizer/setup_env.sh` and the launchd plist; also fixed a
+  quoting syntax error in `setup_env.sh`'s NAS diagnostic block.
+
+### Added
+- `summarizer/setup_env.sh` and `summarizer/mint_token.sh` helpers — secret-free; they
+  pull the Vexa admin token (SSH, NAS `.env`) and the Obsidian MCP bearer (local
+  `vault-as-mcp` plugin config) at runtime and write a gitignored `.env.summarizer.local`.
+
 ## [0.3.0] - 2026-07-06
 
 ### Added
