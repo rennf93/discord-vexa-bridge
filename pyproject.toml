@@ -1,6 +1,6 @@
 [project]
 name = "discord-vexa-bridge"
-version = "0.2.0"
+version = "0.3.0"
 description = "Bridge Discord voice (DAVE/E2EE) into Vexa: per-user transcription written straight to Vexa's Postgres."
 readme = "README.md"
 license = { text = "MIT" }
@@ -25,6 +25,10 @@ dev = [
     "mypy",
     "bandit",
     "pre-commit",
+]
+# Summarizer runs on the Mac (not in the adapter image). Install with: uv sync --extra summarizer
+summarizer = [
+    "litellm",
 ]
 
 [project.urls]

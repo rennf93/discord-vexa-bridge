@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-06
+
+### Added
+- **Meeting summarizer → Obsidian.** A new `summarizer/` package (run as `python -m summarizer`
+  on a Mac launchd timer) reads completed meetings from Vexa, summarizes each via LiteLLM, and
+  writes a structured note (TL;DR, key/talking points, decisions, action items with `@owner`,
+  open questions, full breakdown, optional transcript) to the local Obsidian vault through the
+  `vault-as-mcp` plugin. Also optional writes the summary to the Vexa meeting `notes` field.
+- **Provider-agnostic LLM.** `AI_MODEL=provider/model` + `AI_API_KEY` + `AI_BASE_URL`, mirroring
+  Vexa's dashboard convention — Anthropic Sonnet 5 by default; `ollama/llama3` +
+  `AI_BASE_URL=http://localhost:11434` for self-hosted; any OpenAI-compatible endpoint (vLLM,
+  Groq, OpenRouter). `litellm` is a new `summarizer` extra (lazy-imported, so the adapter image
+  and the test suite don't depend on it).
+- **Idempotent, crash-safe.** Local `state.json` is the source of truth (Vexa's PATCH can't
+  write arbitrary metadata); `create_note`'s fail-if-exists is the crash-recovery backstop.
+  Meetings below `MIN_TRANSCRIPT_SECONDS` are skipped-not-summarized; a meeting that fails 5
+  passes is poisoned and skipped until `state.json` is cleared. `DRY_RUN` runs the full
+  pipeline (including the LLM call) without writing or marking.
+- `summarizer/launchd/com.rennf.vexa-summarizer.plist` template for the Mac timer.
+- `summarizer` added to the mypy + bandit CI gates.
+
 ## [0.2.0] - 2026-07-06
 
 ### Fixed

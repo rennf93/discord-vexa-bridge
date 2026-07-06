@@ -23,11 +23,11 @@ fix: ## Auto-fix lint + format
 
 .PHONY: typecheck
 typecheck: ## Run mypy
-	uv run mypy bot.py dave_voice
+	uv run mypy bot.py dave_voice summarizer
 
 .PHONY: security
 security: ## Run bandit security scan
-	uv run bandit -r bot.py dave_voice -ll
+	uv run bandit -r bot.py dave_voice summarizer -ll
 
 .PHONY: test
 test: ## Run the unit test suite
