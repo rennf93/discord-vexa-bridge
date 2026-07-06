@@ -16,6 +16,7 @@ is transmitting, so a gap with no packets ends an utterance.
 import asyncio
 import audioop  # stdlib on py3.11 (removed in 3.13 — keep the base image at 3.11)
 import io
+import json
 import logging
 import os
 import threading
@@ -23,6 +24,8 @@ import time
 import uuid
 import wave
 from collections import defaultdict
+from pathlib import Path
+from typing import Any
 
 import aiohttp
 import asyncpg
@@ -43,6 +46,14 @@ VEXA_USER_ID = int(os.environ["VEXA_USER_ID"])  # the user id from your create-u
 LANGUAGE = os.environ.get("LANGUAGE", "").strip()  # "" = autodetect
 SILENCE_MS = int(os.environ.get("SILENCE_MS", "800"))  # gap that ends an utterance
 MIN_MS = int(os.environ.get("MIN_UTTERANCE_MS", "400"))  # drop blips shorter than this
+
+# The transcription worker is single-concurrency and CPU-slow on the NAS (~minutes per
+# short clip), so a 503 or a bot restart used to mean lost audio. Segments now spill to
+# disk first and a single background drainer replays them; the queue survives crashes.
+TRANSCRIBE_TIMEOUT = float(os.environ.get("TRANSCRIBE_TIMEOUT", "600"))  # the worker holds a connection for minutes
+PENDING_DIR = Path(os.environ.get("PENDING_DIR", "/data/pending"))
+DRAIN_IDLE_SLEEP = float(os.environ.get("DRAIN_IDLE_SLEEP", "5"))  # scan interval when queue is empty
+DRAIN_BACKOFF = float(os.environ.get("DRAIN_BACKOFF", "10"))  # pause after a failed transcribe attempt
 
 # Pycord decodes Opus to 48 kHz, 16-bit, stereo PCM in the sink.
 SR, CH, SW = 48_000, 2, 2
@@ -171,7 +182,8 @@ async def transcribe(wav: bytes) -> str:
             form.add_field("language", LANGUAGE)
         try:
             async with aiohttp.ClientSession() as s:
-                async with s.post(TRANSCRIBE_URL, data=form, timeout=aiohttp.ClientTimeout(total=120)) as r:
+                timeout = aiohttp.ClientTimeout(total=TRANSCRIBE_TIMEOUT)
+                async with s.post(TRANSCRIBE_URL, data=form, timeout=timeout) as r:
                     if r.status != 200:
                         print(f"transcribe HTTP {r.status}", flush=True)
                         return ""
@@ -188,28 +200,179 @@ async def transcribe(wav: bytes) -> str:
     return ""
 
 
-async def store(meeting: Meeting, uid: int, pcm: bytes, t0: float, t1: float):
-    if (len(pcm) / BYTES_PER_SEC) * 1000 < MIN_MS:
-        return
-    text = await transcribe(to_mono_wav(pcm))
-    if not text:
-        return
-    speaker = await meeting.name_for(uid)
+def spill_segment(
+    meeting_id: int, session_uid: str, speaker: str, t0_off: float, t1_off: float, language: str | None, wav: bytes
+) -> Path:
+    """Durably stage a segment for the background drainer.
+
+    The transcription worker is single-concurrency and CPU-slow (~minutes per short clip
+    on the NAS). Spilling to disk means a 503 or a bot restart never loses audio — the
+    drainer replays it when the worker has capacity. Files survive crashes; on boot the
+    drainer picks up anything left behind and inserts it against the stored meeting_id,
+    so a crash mid-call just delays those rows, it doesn't drop them.
+    """
+    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    base = PENDING_DIR / f"{meeting_id}_{uuid.uuid4().hex}"
+    base.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "meeting_id": meeting_id,
+                "session_uid": session_uid,
+                "speaker": speaker,
+                "t0": t0_off,
+                "t1": t1_off,
+                "language": language,
+            }
+        )
+    )
+    base.with_suffix(".wav").write_bytes(wav)
+    return base
+
+
+def scan_pending() -> list[Path]:
+    """Pending sidecars, oldest first (FIFO replay so transcripts land in order)."""
+    if not PENDING_DIR.exists():
+        return []
+    return sorted(PENDING_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime)
+
+
+def load_segment(json_path: Path) -> tuple[bytes, dict[str, Any]]:
+    meta = json.loads(json_path.read_text())
+    wav = json_path.with_suffix(".wav").read_bytes()
+    return wav, meta
+
+
+def mark_finalizing(meeting_id: int) -> None:
+    """Record that /leave was called — the drainer flips this meeting to 'completed' once
+    its pending queue is empty. On disk (not in-memory) so it survives a restart."""
+    (PENDING_DIR / "finalizing").mkdir(parents=True, exist_ok=True)
+    (PENDING_DIR / "finalizing" / str(meeting_id)).touch()
+
+
+def finalizing_meetings() -> list[int]:
+    d = PENDING_DIR / "finalizing"
+    if not d.exists():
+        return []
+    return sorted(int(p.name) for p in d.iterdir() if p.name.isdigit())
+
+
+async def insert_transcription(meta: dict[str, Any], text: str) -> None:
     async with (await ensure_pool()).acquire() as c:
         await c.execute(
             "INSERT INTO transcriptions"
             " (meeting_id, start_time, end_time, text, speaker, language, session_uid, segment_id, created_at)"
             " VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())",
-            meeting.id,
-            t0 - meeting.t0,
-            t1 - meeting.t0,
+            int(meta["meeting_id"]),
+            float(meta["t0"]),
+            float(meta["t1"]),
             text,
-            speaker,
-            (LANGUAGE or None),
-            meeting.session_uid,
+            meta["speaker"],
+            meta.get("language"),
+            meta["session_uid"],
             str(uuid.uuid4()),
         )
-    print(f"[{speaker}] {text}", flush=True)
+
+
+async def _finalize_completed() -> None:
+    """Mark any finalizing meetings whose pending queue is empty as 'completed'.
+
+    This is why /leave no longer sets 'completed' inline: a summary/webhook fired at
+    'completed' would otherwise see only the segments the slow worker had gotten to.
+    """
+    fms = finalizing_meetings()
+    if not fms:
+        return
+    pending_prefixes = {p.name.split("_", 1)[0] for p in scan_pending()}
+    for meeting_id in fms:
+        if str(meeting_id) in pending_prefixes:
+            continue
+        async with (await ensure_pool()).acquire() as c:
+            await c.execute(
+                "UPDATE meetings SET status='completed', end_time=now(), updated_at=now() WHERE id=$1",
+                meeting_id,
+            )
+        (PENDING_DIR / "finalizing" / str(meeting_id)).unlink(missing_ok=True)
+        print(f"meeting {meeting_id} completed (pending queue drained)", flush=True)
+
+
+async def drain_once() -> str:
+    """Process one pending segment.
+
+    Returns "done" (transcribed + inserted), "failed" (worker busy/down — leave the file,
+    back off), or "idle" (queue empty). Single-concurrency by construction: the worker
+    accepts one job at a time, so the loop driving this never has >1 in flight.
+    """
+    items = scan_pending()
+    if not items:
+        await _finalize_completed()
+        return "idle"
+    json_path = items[0]
+    try:
+        wav, meta = load_segment(json_path)
+    except (OSError, ValueError) as e:
+        print(f"pending {json_path.name} unreadable, dropping: {e}", flush=True)
+        json_path.with_suffix(".wav").unlink(missing_ok=True)
+        json_path.unlink(missing_ok=True)
+        return "done"
+    text = await transcribe(wav)
+    if not text:
+        return "failed"  # worker busy/down — back off, retry this one next pass
+    await insert_transcription(meta, text)
+    json_path.with_suffix(".wav").unlink(missing_ok=True)
+    json_path.unlink(missing_ok=True)
+    print(f"[{meta['speaker']}] {text}", flush=True)
+    await _finalize_completed()
+    return "done"
+
+
+_drain_task: asyncio.Task[None] | None = None
+
+
+async def drain_loop() -> None:
+    """Background replay of spilled segments. The disk directory is the queue, so this
+    survives restarts and recovers crash-left segments on boot."""
+    try:
+        while True:
+            try:
+                status = await drain_once()
+            except Exception as e:  # DB/worker blip — must not kill the drainer
+                print(f"drain error (will retry): {e}", flush=True)
+                await asyncio.sleep(DRAIN_BACKOFF)
+                continue
+            if status == "done":
+                await asyncio.sleep(0)  # yield, then immediately pull the next one
+            elif status == "failed":
+                await asyncio.sleep(DRAIN_BACKOFF)
+            else:
+                await asyncio.sleep(DRAIN_IDLE_SLEEP)
+    except asyncio.CancelledError:
+        pass
+
+
+def ensure_drain_loop() -> None:
+    global _drain_task
+    if _drain_task is None or _drain_task.done():
+        _drain_task = asyncio.create_task(drain_loop())
+
+
+async def store(meeting: Meeting, uid: int, pcm: bytes, t0: float, t1: float):
+    """Spill a segment to the durable queue. The drainer transcribes + inserts it.
+
+    Doing the downmix here (not in the drainer) keeps the drainer a pure read-POST-insert
+    loop and means the disk holds a worker-ready 16 kHz WAV, not raw 48 kHz PCM.
+    """
+    if (len(pcm) / BYTES_PER_SEC) * 1000 < MIN_MS:
+        return
+    speaker = await meeting.name_for(uid)
+    spill_segment(
+        meeting.id,
+        meeting.session_uid,
+        speaker,
+        t0 - meeting.t0,
+        t1 - meeting.t0,
+        (LANGUAGE or None),
+        to_mono_wav(pcm),
+    )
 
 
 async def flusher(guild_id: int):
@@ -302,6 +465,7 @@ async def join(ctx: discord.ApplicationContext):
         await ctx.respond(f"Failed to start voice receive: {e}", ephemeral=True)
         return
     task = asyncio.create_task(flusher(guild.id))
+    ensure_drain_loop()  # in case on_ready hasn't run / the task died
     active[guild.id] = (vc, client, sink, meeting, task)
     await ctx.respond(f"Recording **{channel.name}** → meeting `{meeting_id}`. Speakers tagged by name.")
 
@@ -323,12 +487,13 @@ async def leave(ctx: discord.ApplicationContext):
     await vc.disconnect(force=True)  # change_voice_state(None) + cleanup
     for uid, pcm, t0, t1 in sink.drain_all():
         await store(meeting, uid, pcm, t0, t1)
-    async with (await ensure_pool()).acquire() as c:
-        await c.execute(
-            "UPDATE meetings SET status='completed', end_time=now(), updated_at=now() WHERE id=$1",
-            meeting.id,
-        )
-    await ctx.respond(f"Stopped. meeting `{meeting.id}` saved.")
+    # Don't mark 'completed' here: the slow worker may still be draining spilled segments,
+    # and a summary/webhook fired at 'completed' needs every utterance. The drainer flips
+    # the status once this meeting's pending queue is empty (see _finalize_completed).
+    mark_finalizing(meeting.id)
+    ensure_drain_loop()
+    queued = len(scan_pending())
+    await ctx.respond(f"Stopped. {queued} segment(s) queued → meeting `{meeting.id}` transcribes in the background.")
 
 
 @bot.event
@@ -344,6 +509,7 @@ async def on_ready():
                 break
             except Exception:
                 continue
+    ensure_drain_loop()  # pick up any segments spilled before a restart
     print(f"discord-adapter ready as {bot.user}", flush=True)
 
 

@@ -221,6 +221,12 @@ services:
       VEXA_USER_ID: "1"          # <- the user id from your create-user curl
       LANGUAGE: ""               # "" = autodetect (leave blank for it/es/en mixed)
       SILENCE_MS: "800"          # gap (ms) that ends an utterance
+      # Durable queue for segments the slow CPU worker can't transcribe immediately.
+      # Must be a mounted volume — this is what survives 503s and bot restarts.
+      PENDING_DIR: /data/pending
+      TRANSCRIBE_TIMEOUT: "600"  # the worker holds a connection for minutes per clip
+    volumes:
+      - discord-pending:/data/pending
     networks: [vexa]
     restart: unless-stopped
 
@@ -249,3 +255,4 @@ volumes:
   postgres-data:
   minio-data:
   whisper-models:
+  discord-pending:
