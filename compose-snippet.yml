@@ -16,5 +16,15 @@
       LANGUAGE: ""               # "" = autodetect (leave blank for mixed it/es/en)
       SILENCE_MS: "800"          # gap (ms) that ends an utterance
     depends_on: [postgres, transcription-worker]
+    volumes:
+      # Durable segment queue: spilled segments survive transcription-worker 503s,
+      # bot restarts, AND image updates. WITHOUT this, /data/pending lives in the
+      # container's ephemeral writable layer and `compose up -d` (image pull) wipes
+      # every pending segment — silently losing captured audio on the next deploy.
+      - discord-pending:/data/pending
     networks: [vexa]
     restart: unless-stopped
+
+# And declare the volume at the top level of your docker-compose.yaml:
+#   volumes:
+#     discord-pending:
