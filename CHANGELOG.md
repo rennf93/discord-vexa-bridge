@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-07
+
+### Fixed
+- **The drainer no longer blocks the whole queue on a silence clip.** `drain_once`
+  treated an empty `transcribe()` result as "worker busy/down" and retried the same
+  FIFO head file with backoff. But the Whisper worker returns 200 OK with empty text
+  when VAD strips a clip (no speech) — a legitimate result, not a failure. So a single
+  silence segment at the head of the queue blocked every segment behind it indefinitely.
+  Live symptom: a real Discord call spilled 367 segments (both speakers captured
+  correctly — the DAVE receive path was fine) but only the ~9 drained in realtime before
+  `/leave` ever reached Vexa; the meeting stayed `active` because the drainer was stuck
+  retrying one 0.5s silence clip for hours. `transcribe` now returns `None` only when the
+  worker is genuinely unavailable (non-200 / connection error / exception → retry); a
+  200-OK response returns the text (possibly empty), and `drain_once` deletes the clip
+  and advances whether or not there was speech. Silence can no longer block the queue.
+- **The pending queue is actually durable across deploys.** The compose snippet never
+  mapped `/data/pending` to a volume, so the "durable" queue from 0.2.0 lived in the
+  container's ephemeral writable layer and any `compose up -d` that recreated the
+  container (e.g. pulling a new image) silently wiped every spilled segment — losing
+  captured audio on the next deploy. This lost real data once. `compose-snippet.yml`
+  now mounts `discord-pending:/data/pending` (with a top-level volume declaration).
+
+### Verified
+- End-to-end on a real two-speaker Discord call: both speakers (Renzo + Dollylogon)
+  captured via DAVE, spilled to the durable queue, drained through the worker, inserted,
+  meeting auto-completed when the queue emptied, and the summarizer wrote an Obsidian
+  note with both participants. 109 tests pass; mypy/ruff/bandit clean.
+
 ## [0.4.0] - 2026-07-07
 
 ### Fixed
