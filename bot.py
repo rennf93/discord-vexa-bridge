@@ -169,10 +169,15 @@ def to_mono_wav(pcm_stereo: bytes) -> bytes:
     return buf.getvalue()
 
 
-async def transcribe(wav: bytes) -> str:
+async def transcribe(wav: bytes) -> str | None:
     # Retry only on connection errors (worker restarting / still loading its model);
     # do NOT retry timeouts — those mean the worker is overloaded and retrying would
     # only deepen the backlog. FormData is single-use, so rebuild it per attempt.
+    #
+    # Returns None when the worker is unavailable (non-200 / connection error / other
+    # exception) — the caller retries. Returns "" when the worker responded 200 OK but
+    # found no speech (VAD stripped the clip) — that is a legitimate empty result, not a
+    # failure; the caller must advance the queue, not retry the same silence forever.
     attempts = 3
     for attempt in range(attempts):
         form = aiohttp.FormData()
@@ -186,18 +191,18 @@ async def transcribe(wav: bytes) -> str:
                 async with s.post(TRANSCRIBE_URL, data=form, timeout=timeout) as r:
                     if r.status != 200:
                         print(f"transcribe HTTP {r.status}", flush=True)
-                        return ""
+                        return None
                     return ((await r.json()).get("text") or "").strip()
         except aiohttp.ClientConnectorError as e:
             if attempt < attempts - 1:
                 await asyncio.sleep(2 * (attempt + 1))  # 2s, 4s backoff
                 continue
             print(f"transcribe worker unreachable after {attempts} tries: {e}", flush=True)
-            return ""
+            return None
         except Exception as e:
             print(f"transcribe error: {e}", flush=True)
-            return ""
-    return ""
+            return None
+    return None
 
 
 def spill_segment(
@@ -315,12 +320,16 @@ async def drain_once() -> str:
         json_path.unlink(missing_ok=True)
         return "done"
     text = await transcribe(wav)
-    if not text:
+    if text is None:
         return "failed"  # worker busy/down — back off, retry this one next pass
-    await insert_transcription(meta, text)
+    # Worker responded (200 OK). Empty text = silence/VAD-stripped — a legitimate no-speech
+    # result, NOT a failure. Delete the clip and advance so a single silence segment can't
+    # block the FIFO queue behind it forever (the stuck-queue bug).
+    if text:
+        await insert_transcription(meta, text)
+        print(f"[{meta['speaker']}] {text}", flush=True)
     json_path.with_suffix(".wav").unlink(missing_ok=True)
     json_path.unlink(missing_ok=True)
-    print(f"[{meta['speaker']}] {text}", flush=True)
     await _finalize_completed()
     return "done"
 

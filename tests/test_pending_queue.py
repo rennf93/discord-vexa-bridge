@@ -81,13 +81,27 @@ async def test_drain_once_transcribes_inserts_and_deletes(pending, monkeypatch):
     assert botmod.scan_pending() == []  # file removed on success
 
 
-async def test_drain_once_failed_leaves_file_for_retry(pending, monkeypatch):
+async def test_drain_once_worker_down_leaves_file_for_retry(pending, monkeypatch):
+    """Worker unavailable (non-200 / connection error) → transcribe returns None → retry."""
     _spill(meeting_id=7)
-    monkeypatch.setattr(botmod, "transcribe", lambda wav: asyncio.sleep(0, result=""))  # 503 → ""
+    monkeypatch.setattr(botmod, "transcribe", lambda wav: asyncio.sleep(0, result=None))  # worker down
     monkeypatch.setattr(botmod, "insert_transcription", _no_insert)
     status = await botmod.drain_once()
     assert status == "failed"
     assert len(botmod.scan_pending()) == 1  # still queued
+
+
+async def test_drain_once_silence_advances_and_deletes(pending, monkeypatch):
+    """Worker responded 200 OK but no speech (VAD stripped it) → empty text is a legitimate
+    result, NOT a failure. The clip must be deleted and the queue advanced; otherwise a single
+    silence segment blocks the FIFO queue forever (root cause of the stuck-queue bug)."""
+    _spill(meeting_id=7, speaker="Dollylogon")
+    monkeypatch.setattr(botmod, "transcribe", lambda wav: asyncio.sleep(0, result=""))  # 200 OK, silence
+    monkeypatch.setattr(botmod, "insert_transcription", _no_insert)
+    status = await botmod.drain_once()
+    assert status == "done"  # advanced, not retried
+    assert botmod.scan_pending() == []  # clip deleted — queue not blocked by silence
+    # nothing to insert, so insert_transcription must not have run
 
 
 async def test_finalizing_meeting_completes_when_queue_drains(pending, monkeypatch):
@@ -116,7 +130,7 @@ async def test_finalizing_meeting_completes_when_queue_drains(pending, monkeypat
 async def test_finalizing_not_completed_while_queue_has_segments(pending, monkeypatch):
     _spill(meeting_id=7)
     botmod.mark_finalizing(7)
-    monkeypatch.setattr(botmod, "transcribe", lambda wav: asyncio.sleep(0, result=""))  # fails
+    monkeypatch.setattr(botmod, "transcribe", lambda wav: asyncio.sleep(0, result=None))  # worker down
     monkeypatch.setattr(botmod, "insert_transcription", _no_insert)
     monkeypatch.setattr(botmod, "ensure_pool", _fake_pool)
     await botmod.drain_once()  # failed — must NOT finalize
