@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-07
+
+### Added
+- CLA assistant workflow + CLA.md, a documentation issue template, and a `scripts/bump_version.py` changelog/version helper. Parity with `obsidian-vexa-bridge`.
+
 ## [0.5.0] - 2026-07-07
 
 ### Removed

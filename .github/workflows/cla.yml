@@ -1,0 +1,39 @@
+name: CLA Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  # write (not read): CLA Assistant commits signatures/version1/cla.json to the
+  # cla-signatures branch in this repo, so GITHUB_TOKEN needs contents:write.
+  # With read-only it 403s ("Resource not accessible by integration") and the
+  # signature is never recorded even after the contributor signs.
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CLA Assistant
+        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PERSONAL_ACCESS_TOKEN is only required if signatures are stored in
+          # a separate repository. For same-repo storage, GITHUB_TOKEN suffices.
+        with:
+          # Sentence the contributor posts as a PR comment to sign.
+          custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
+          custom-allsigned-prcomment: "All contributors have signed the CLA. Thank you!"
+          # Where signatures are stored (a branch in this repo).
+          path-to-signatures: "signatures/version1/cla.json"
+          path-to-document: "https://github.com/rennf93/discord-vexa-bridge/blob/master/CLA.md"
+          branch: "cla-signatures"
+          # Bots and the maintainer are exempt from signing.
+          allowlist: "dependabot[bot],rennf93"
