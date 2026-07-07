@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-07
+
+### Removed
+- **The `summarizer/` package has moved to its own repo, `obsidian-vexa-bridge`** (github.com/rennf93/obsidian-vexa-bridge) — the Vexa → Obsidian sink adapter, the out-side of the in/out adapter pair around Vexa. The bridge is now Discord-in only. The bridge Docker image never copied `summarizer/` (it was a Mac-side `uv sync --extra summarizer` runner), so the adapter image and runtime behavior are unchanged. The `summarizer` optional-dependency extra and its mypy/bandit CI targets are dropped. 58 tests pass (was 109); mypy/ruff/bandit clean on `bot.py dave_voice`.
+
 ## [0.4.1] - 2026-07-07
 
 ### Fixed
