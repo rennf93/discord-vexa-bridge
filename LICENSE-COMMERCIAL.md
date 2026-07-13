@@ -22,7 +22,7 @@ copy and lets you ship the bridge under proprietary terms.
 
 To obtain a commercial license, contact the author:
 
-- **Email:** `commercial@renzof.dev` _(placeholder — replace before publishing)_
+- **Email:** `contact@guard-core.com`
 - or open an issue at <https://github.com/rennf93/discord-vexa-bridge/issues>
 
 ## 3. Contributions

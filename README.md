@@ -22,6 +22,12 @@ Discord call then looks just like any other meeting.
 > decryption (via [`dave.py`](https://pypi.org/project/dave.py/), the libdave binding) — so per-user
 > capture works **today**.
 
+> **Which Vexa version?** This bridge targets the **Vexa 0.10.x** line (direct Postgres writes).
+> Vexa **0.12** dropped the `discord` platform and changed the ingest path, so the bridge does not
+> work against 0.12 today; an external-ingest contract is planned for the **0.12.x** line
+> ([Vexa #463](https://github.com/Vexa-ai/vexa/issues/463)). Run it against a Vexa 0.10.x stack.
+> See [Which Vexa version?](docs/usage/vexa-version-targeting.md) for the full version map.
+
 ---
 
 ## How it works
