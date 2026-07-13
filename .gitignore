@@ -82,3 +82,7 @@ logs/
 
 # Others
 DAVE_IMPL.md
+
+# Docs build
+.venv-docs/
+site/
