@@ -7,6 +7,7 @@
 
 # Superpowers (session-private design + plans)
 .superpowers/*
+docs/superpowers/
 
 # Python (anchored to repo root so the names don't shadow legitimate
 # subdirectories like panel/src/lib).

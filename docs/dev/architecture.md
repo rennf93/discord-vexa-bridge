@@ -43,10 +43,9 @@ creds (token / endpoint / `session_id`) from the main-gateway `VOICE_STATE_UPDAT
 
 `dave_voice/mls.py` joins the call's MLS group via the voice-gateway binary opcodes (the gateway
 acts as the MLS external sender — only its proposals are processed). The MLS group state machine
-and per-sender decryptor are provided by `dave.py` (the libdave binding). See the
-[DAVE implementation notes](https://github.com/rennf93/discord-vexa-bridge/blob/master/DAVE_IMPL.md)
-for the full opcode table and the frame layout (trailing `0xFAFA` magic marker, truncated GCM tag,
-ULEB128 nonce, per-epoch ratcheted sender secret).
+and per-sender decryptor are provided by `dave.py` (the libdave binding). The receive path uses
+the voice-gateway binary opcode table and a frame layout with a trailing `0xFAFA` magic marker,
+truncated GCM tag, ULEB128 nonce, and per-epoch ratcheted sender secret.
 
 ## Opus decode
 
@@ -69,8 +68,6 @@ display-name lookup (`Meeting.name_for`) stays as-is.
 
 ## Further reading
 
-- [DAVE implementation notes](https://github.com/rennf93/discord-vexa-bridge/blob/master/DAVE_IMPL.md) —
-  the full receive-path design spec (opcode table, frame layout, milestone sequence).
 - DAVE protocol whitepaper — <https://daveprotocol.com>
 - Protocol repo / test vectors — <https://github.com/discord/dave-protocol>
 - Reference implementation (C++/JS) — <https://github.com/discord/libdave>

@@ -16,9 +16,8 @@ On CPU with `large-v3-turbo` a short utterance can take tens of seconds; drop th
 The decrypt path tracks the published spec via `dave.py`/libdave; protocol bumps may need
 updates to the decrypt path / `dave.py`. DAVE is versioned and Discord-controlled — the gateway
 selects the lowest shared version, and you must retain backwards-compat for non-discontinued
-versions. This is ongoing maintenance, not a one-shot. See the
-[DAVE implementation notes](https://github.com/rennf93/discord-vexa-bridge/blob/master/DAVE_IMPL.md)
-and the protocol references at <https://daveprotocol.com>.
+versions. This is ongoing maintenance, not a one-shot. See the protocol references at
+<https://daveprotocol.com>.
 
 ## Frame decrypt failures at epoch edges
 
