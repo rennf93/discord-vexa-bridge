@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/ci.yml)
 [![Release](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/release.yml/badge.svg)](https://github.com/rennf93/discord-vexa-bridge/actions/workflows/release.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-mkdocs%20material-blue.svg)](https://rennf93.github.io/discord-vexa-bridge/)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 
 Bring **Discord voice calls into [Vexa](https://github.com/Vexa-ai/vexa)** as transcripts —
@@ -185,6 +186,19 @@ make build              # build the Docker image
 See [CONTRIBUTING.md](CONTRIBUTING.md). The voice-receive internals live in `dave_voice/`; `bot.py`
 is the control plane (slash commands + the transcription/DB pipeline).
 
+## Documentation
+
+Full docs — deployment, configuration, troubleshooting, and the DAVE receive
+architecture — are at **<https://rennf93.github.io/discord-vexa-bridge/>**.
+
 ## License
 
-[MIT](LICENSE) (c) Renzo Franceschini. Not affiliated with Discord or Vexa.
+This project is **dual-licensed**:
+
+- **Open-source use** under the **GNU AGPL-3.0-or-later** ([LICENSE](LICENSE)) — free, with
+  the network-use source-disclosure obligation of AGPL §13.
+- A **commercial license** is available for those who cannot or do not wish to comply with
+  the AGPL (e.g. embedding in a closed SaaS / proprietary product) — see
+  [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+
+(c) Renzo Franceschini. Not affiliated with Discord or Vexa.
