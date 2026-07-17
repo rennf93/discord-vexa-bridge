@@ -61,7 +61,7 @@ jobs:
             -t "${GHCR}/${IMAGE}:${VERSION}" -t "${GHCR}/${IMAGE}:latest" \
             -t "${DOCKERHUB}/${IMAGE}:${VERSION}" -t "${DOCKERHUB}/${IMAGE}:latest" \
             --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
-            --label org.opencontainers.image.licenses=MIT \
+            --label org.opencontainers.image.licenses=AGPL-3.0-or-later \
             .
 
           # Push only after the build succeeds, so a failure never half-publishes.

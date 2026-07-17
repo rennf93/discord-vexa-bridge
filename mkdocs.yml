@@ -1,0 +1,57 @@
+site_name: discord-vexa-bridge
+site_url: https://rennf93.github.io/discord-vexa-bridge/
+repo_url: https://github.com/rennf93/discord-vexa-bridge
+repo_name: rennf93/discord-vexa-bridge
+edit_uri: edit/master/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.action.edit
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Overview: index.md
+  - Usage:
+      - usage/deploy.md
+      - usage/config.md
+      - usage/vexa-version-targeting.md
+      - usage/troubleshooting.md
+      - usage/limitations.md
+  - Development:
+      - dev/architecture.md
+      - dev/layout.md
+      - dev/testing.md
+      - dev/contributing.md
+      - dev/releasing.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - attr_list
+  - md_in_html
