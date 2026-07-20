@@ -276,6 +276,13 @@ async def insert_transcription(meta: dict[str, Any], text: str) -> None:
             meta["session_uid"],
             str(uuid.uuid4()),
         )
+        # Keep the row visibly live: Vexa 0.12's reconcile sweep reaps non-terminal
+        # meetings by updated_at staleness, and bridge rows have no bot container it
+        # could probe instead.
+        await c.execute(
+            "UPDATE meetings SET updated_at=now() WHERE id=$1",
+            int(meta["meeting_id"]),
+        )
 
 
 async def _finalize_completed() -> None:
@@ -436,6 +443,18 @@ async def join(ctx: discord.ApplicationContext):
     t0 = time.monotonic()
     session_uid = str(uuid.uuid4())
     async with (await ensure_pool()).acquire() as c:
+        # A crash mid-call leaves the meetings row 'active' (nothing terminal-marks it),
+        # and Vexa 0.12 adds a unique partial index allowing at most ONE non-terminal
+        # meeting per (user_id, platform, platform_specific_id) — the INSERT below would
+        # raise UniqueViolation on rejoin. Retire any stale row first; its already-queued
+        # segments still drain into the DB (the drainer doesn't check status).
+        await c.execute(
+            "UPDATE meetings SET status='failed', end_time=now(), updated_at=now()"
+            " WHERE user_id=$1 AND platform='discord' AND platform_specific_id=$2"
+            " AND status NOT IN ('completed','failed')",
+            VEXA_USER_ID,
+            str(channel.id),
+        )
         meeting_id = await c.fetchval(
             "INSERT INTO meetings"
             " (user_id, platform, platform_specific_id, status, start_time, data, created_at, updated_at)"
