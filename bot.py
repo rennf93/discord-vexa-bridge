@@ -276,6 +276,13 @@ async def insert_transcription(meta: dict[str, Any], text: str) -> None:
             meta["session_uid"],
             str(uuid.uuid4()),
         )
+        # Keep the row visibly live: Vexa 0.12's reconcile sweep reaps non-terminal
+        # meetings by updated_at staleness, and bridge rows have no bot container it
+        # could probe instead.
+        await c.execute(
+            "UPDATE meetings SET updated_at=now() WHERE id=$1",
+            int(meta["meeting_id"]),
+        )
 
 
 async def _finalize_completed() -> None:
