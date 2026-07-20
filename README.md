@@ -22,11 +22,13 @@ Discord call then looks just like any other meeting.
 > decryption (via [`dave.py`](https://pypi.org/project/dave.py/), the libdave binding) — so per-user
 > capture works **today**.
 
-> **Which Vexa version?** This bridge targets the **Vexa 0.10.x** line (direct Postgres writes).
-> Vexa **0.12** dropped the `discord` platform and changed the ingest path, so the bridge does not
-> work against 0.12 today; an external-ingest contract is planned for the **0.12.x** line
-> ([Vexa #463](https://github.com/Vexa-ai/vexa/issues/463)). Run it against a Vexa 0.10.x stack.
-> See [Which Vexa version?](docs/usage/vexa-version-targeting.md) for the full version map.
+> **Which Vexa version?** Bridge **0.6.0+** runs against **Vexa 0.10.x and 0.12.x** (verified on
+> v0.12.15). Vexa 0.12's read API serves `discord` rows fine; only its *bot* endpoints reject the
+> platform, and this bridge writes directly to Postgres, bypassing them. On 0.12.x you must raise
+> `RECONCILE_ACTIVE_GRACE_S` on meeting-api and keep the transcription unit token-open — see
+> [Which Vexa version?](docs/usage/vexa-version-targeting.md) for the full version map and the
+> 0.12 deployment notes. The schema is still Vexa-internal; the sealed external-ingest contract
+> remains tracked in [Vexa #463](https://github.com/Vexa-ai/vexa/issues/463).
 
 ---
 
