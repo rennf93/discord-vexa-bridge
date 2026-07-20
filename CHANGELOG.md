@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-20
+
+### Added
+- **Vexa 0.12.x compatibility** (verified against v0.12.15). The direct-Postgres contract survives the 0.12 rewrite unchanged (`meetings.platform_specific_id` String, `transcriptions.segment_id` nullable String, `meeting_sessions` identical), and 0.12's read API serves `discord` rows — only bot endpoints reject the platform, which this bridge never calls. Deployment notes for 0.12.x (reconcile grace, token-open transcription unit) are in `docs/usage/vexa-version-targeting.md`.
+
+### Fixed
+- **`/join` retires stale non-terminal meeting rows for the channel before inserting.** A crash mid-call used to leave the row `active` forever; under Vexa 0.12's new unique partial index (one non-terminal meeting per user/platform/channel) that made the next `/join` of the same channel fail with an unhandled `UniqueViolationError` and leak the voice connection. The already-queued segments of the retired row still drain into the DB.
+- **Each transcription insert now bumps `meetings.updated_at`.** Vexa 0.12's reconcile sweep reaps non-terminal meetings by `updated_at` staleness (bridge rows have no bot container it could probe instead); without the heartbeat a live call was force-completed after ~5 minutes and downstream consumers (e.g. obsidian-vexa-bridge) summarized partial transcripts. Pair with a raised `RECONCILE_ACTIVE_GRACE_S` to also survive long silences.
+
 ## [0.5.1] - 2026-07-07
 
 ### Added
