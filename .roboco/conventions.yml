@@ -1,0 +1,33 @@
+# Architectural conventions for this project.
+# Auto-scaffolded by RoboCo — edit freely; this file is canonical.
+# Each module lists definition KINDS forbidden in it; rules toggle
+# warn/block; waivers are accountable, PR-reviewed escape hatches.
+version: 1
+languages:
+- python
+modules: []
+rules:
+  no_lint_suppressions:
+    level: block
+  no_inline_comments:
+    level: warn
+  modular_cohesion:
+    level: block
+  god_class:
+    level: warn
+  thin_routes:
+    level: block
+custom:
+- id: tests
+  pattern: tests/
+  message: '`tests/` — unit tests (pytest, asyncio_mode=auto). No network or live
+    Discord required.'
+  level: warn
+  languages: []
+- id: discord-token
+  pattern: DISCORD_TOKEN
+  message: Never commit secrets. `DISCORD_TOKEN`, `DATABASE_URL`, and `.env` are runtime
+    config and are
+  level: warn
+  languages: []
+waivers: []
