@@ -1,11 +1,16 @@
-"""Emit Vexa's webhook.v1 `meeting.completed` envelope when the bridge finalizes a meeting.
+"""Emit a `meeting.completed` webhook when the bridge finalizes a Discord meeting.
 
 This bridge writes Discord meetings straight into Vexa's Postgres (see `_finalize_completed`
 in bot.py), so Vexa's own webhook emitter never sees them and `meeting.completed` never
 fires for a Discord call. The obsidian-vexa-bridge gained a webhook receiver that accepts
-Vexa's exact webhook.v1 envelope and HMAC signature, so it can process a meeting on the
-event instead of polling — this module reproduces that contract byte-for-byte (envelope
-shape, signing, headers), verified against Vexa's own emitter source.
+`event_id`, `event_type`, `api_version`, `created_at`, and a `data.meeting` block carrying
+`id`, `platform`, `native_meeting_id`, `status`, `completion_reason`, `start_time`, and
+`end_time`, plus a `source` marker identifying this bridge, signed exactly the way Vexa
+signs its own webhooks (`sha256=hmac(secret, timestamp + "." + body)`). This module builds
+that envelope and signs it the same way, so the receiver can process a meeting on the event
+instead of polling. It is NOT Vexa's full webhook.v1 `data.meeting` object (which also
+carries `user_id`, `constructed_meeting_url`, `failure_stage`, `data`, `created_at`, and
+`updated_at`) and its `event_id` hash input is bridge-specific, not Vexa's.
 """
 
 from __future__ import annotations
@@ -25,8 +30,13 @@ API_VERSION = "2026-03-01"
 Poster = Callable[[str, dict[str, str], bytes], Awaitable[int]]
 
 
-def _iso_z(dt: datetime) -> str:
-    """Format a datetime as ISO 8601 UTC with a trailing Z, Vexa's envelope timestamp format."""
+def _iso_z(dt: datetime | None) -> str | None:
+    """Format a datetime as ISO 8601 UTC with a trailing Z, Vexa's envelope timestamp format.
+
+    Returns None when `dt` is None, so the caller can omit the key instead of raising.
+    """
+    if dt is None:
+        return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
     return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
@@ -35,39 +45,44 @@ def _iso_z(dt: datetime) -> str:
 def build_envelope(
     meeting_id: int,
     native_meeting_id: str,
-    start_time: datetime,
-    end_time: datetime,
+    start_time: datetime | None,
+    end_time: datetime | None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Build the webhook.v1 envelope for a completed Discord meeting.
+    """Build the meeting.completed envelope for a completed Discord meeting.
+
+    `start_time` and `end_time` are both nullable in Vexa's schema. A missing `end_time` is
+    omitted from the envelope (the receiver treats it as optional); a missing `start_time`
+    falls back to `end_time`, then to `created_at`, so the envelope always has a start marker.
 
     `event_id` is derived only from `meeting_id` (never from `now`), so a redelivered
     completion for the same meeting produces the same event_id and the receiver can dedup.
     """
     created_at = now if now is not None else datetime.now(UTC)
     event_id = "evt_" + hashlib.sha256(f"discord-vexa-bridge|{meeting_id}|completed".encode()).hexdigest()[:32]
+    meeting: dict[str, Any] = {
+        "id": meeting_id,
+        "platform": "discord",
+        "native_meeting_id": native_meeting_id,
+        "status": "completed",
+        "completion_reason": "stopped",
+        "start_time": _iso_z(start_time if start_time is not None else (end_time or created_at)),
+        "source": "discord-vexa-bridge",
+    }
+    end_iso = _iso_z(end_time)
+    if end_iso is not None:
+        meeting["end_time"] = end_iso
     return {
         "event_id": event_id,
         "event_type": "meeting.completed",
         "api_version": API_VERSION,
         "created_at": _iso_z(created_at),
-        "data": {
-            "meeting": {
-                "id": meeting_id,
-                "platform": "discord",
-                "native_meeting_id": native_meeting_id,
-                "status": "completed",
-                "completion_reason": "stopped",
-                "start_time": _iso_z(start_time),
-                "end_time": _iso_z(end_time),
-                "source": "discord-vexa-bridge",
-            }
-        },
+        "data": {"meeting": meeting},
     }
 
 
 def sign(secret: str, timestamp: str, body: bytes) -> str:
-    """HMAC-SHA256 over `timestamp + "." + body` — the exact check the receiver runs."""
+    """HMAC-SHA256 over `timestamp + "." + body`, the exact check the receiver runs."""
     mac = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256)
     return f"sha256={mac.hexdigest()}"
 
