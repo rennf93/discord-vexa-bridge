@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-27
+
+### Added
+- **`meeting.completed` webhook emission.** This bridge writes Discord meetings straight into Vexa's Postgres, so Vexa's own webhook emitter never sees them and `meeting.completed` never fires for a Discord call. Set `COMPLETION_WEBHOOK_URL` (and the now-required `COMPLETION_WEBHOOK_SECRET`) to have `_finalize_completed` emit Vexa's exact `webhook.v1` envelope — same shape, same HMAC-SHA256 signature over `timestamp + "." + raw_body`, same headers — as a fire-and-forget background task once a meeting's pending transcription queue has fully drained. `event_id` is deterministic per meeting so redeliveries dedup on the receiving end. New `completion_webhook.py` module (`build_envelope`, `sign`, `headers_for`, `emit`); unset URL keeps the feature off. The reference receiver is [`obsidian-vexa-bridge`](https://github.com/rennf93/obsidian-vexa-bridge).
+
 ## [0.6.0] - 2026-07-20
 
 ### Added

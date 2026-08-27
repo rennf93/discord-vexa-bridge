@@ -15,6 +15,8 @@
       VEXA_USER_ID: "1"          # the Vexa user id that owns these meetings
       LANGUAGE: ""               # "" = autodetect (leave blank for mixed it/es/en)
       SILENCE_MS: "800"          # gap (ms) that ends an utterance
+      # COMPLETION_WEBHOOK_URL: "https://your-obsidian-bridge.example/webhooks/vexa"  # optional; unset = feature off
+      # COMPLETION_WEBHOOK_SECRET: "${COMPLETION_WEBHOOK_SECRET}"  # required once the URL above is set
     depends_on: [postgres, transcription-worker]
     volumes:
       # Durable segment queue: spilled segments survive transcription-worker 503s,
