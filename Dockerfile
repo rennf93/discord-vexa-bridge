@@ -9,6 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends libopus0 \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY bot.py .
+COPY bot.py completion_webhook.py .
 COPY dave_voice ./dave_voice
 CMD ["python", "bot.py"]

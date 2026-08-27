@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-27
+
+### Fixed
+- The image now ships `completion_webhook.py`: 0.7.0's Dockerfile copied only `bot.py` and `dave_voice/`, so the container failed at import and the bot never came up. The CI image smoke test imports the module from now on.
+
 ## [0.7.0] - 2026-08-27
 
 ### Added
