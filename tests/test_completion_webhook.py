@@ -3,8 +3,8 @@
 Root cause this exists: the bridge writes Discord meetings straight into Vexa's Postgres,
 so Vexa's own webhook emitter never sees them and its meeting.completed event never fires.
 The obsidian-vexa-bridge receiver expects Vexa's exact webhook.v1 envelope and signature,
-so these tests pin the contract byte-for-byte against an independent HMAC computation —
-not just "does emit() call our own sign()".
+so these tests pin the contract against an independent HMAC computation, not just "does
+emit() call our own sign()".
 """
 
 import hashlib
@@ -39,6 +39,36 @@ def test_build_envelope_shape():
     }
     assert envelope["event_id"].startswith("evt_")
     assert len(envelope["event_id"]) == len("evt_") + 32
+
+
+def test_build_envelope_tolerates_null_end_time():
+    """end_time is nullable in Vexa's schema; a still-open row must not raise. The receiver
+    treats a missing end_time as optional, so the key is omitted rather than sent as null."""
+    start = datetime(2026, 8, 27, 10, 0, 0, tzinfo=UTC)
+    envelope = cw.build_envelope(42, "123456789012345678", start, None)
+
+    meeting = envelope["data"]["meeting"]
+    assert meeting["start_time"] == "2026-08-27T10:00:00Z"
+    assert "end_time" not in meeting
+
+
+def test_build_envelope_tolerates_null_start_time():
+    """start_time is nullable too; fall back to end_time so the envelope still has a marker."""
+    end = datetime(2026, 8, 27, 10, 30, 0, tzinfo=UTC)
+    envelope = cw.build_envelope(42, "123456789012345678", None, end)
+
+    meeting = envelope["data"]["meeting"]
+    assert meeting["start_time"] == "2026-08-27T10:30:00Z"
+    assert meeting["end_time"] == "2026-08-27T10:30:00Z"
+
+
+def test_build_envelope_falls_back_to_now_when_both_timestamps_null():
+    now = datetime(2026, 8, 27, 11, 0, 0, tzinfo=UTC)
+    envelope = cw.build_envelope(42, "123456789012345678", None, None, now=now)
+
+    meeting = envelope["data"]["meeting"]
+    assert meeting["start_time"] == "2026-08-27T11:00:00Z"
+    assert "end_time" not in meeting
 
 
 def test_event_id_is_deterministic_per_meeting():

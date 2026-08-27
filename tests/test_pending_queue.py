@@ -134,7 +134,7 @@ async def test_finalizing_meeting_completes_when_queue_drains(pending, monkeypat
 
 async def test_finalize_completed_emits_webhook_when_configured(pending, monkeypatch):
     """_finalize_completed fires the webhook (as a tracked background task) once configured."""
-    botmod.mark_finalizing(7)  # queue already drained — nothing spilled for meeting 7
+    botmod.mark_finalizing(7)  # queue already drained, nothing spilled for meeting 7
     monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_URL", "https://example.test/hook")
     monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_SECRET", "s3cr3t")
 
@@ -170,8 +170,74 @@ async def test_finalize_completed_emits_webhook_when_configured(pending, monkeyp
     assert botmod.finalizing_meetings() == []
 
 
+async def test_finalize_completed_emits_webhook_with_null_end_time(pending, monkeypatch):
+    """A still-open row (end_time NULL) must not raise and must not drop the webhook."""
+    botmod.mark_finalizing(7)
+    monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_URL", "https://example.test/hook")
+    monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_SECRET", "s3cr3t")
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            return {"platform_specific_id": "999", "start_time": start, "end_time": None}
+
+    async def fake_pool():
+        return _FakeCtx(_Conn())
+
+    monkeypatch.setattr(botmod, "ensure_pool", fake_pool)
+
+    emitted = []
+
+    async def fake_emit(url, secret, envelope, **kwargs):
+        emitted.append(envelope)
+        return True
+
+    monkeypatch.setattr(botmod.completion_webhook, "emit", fake_emit)
+
+    await botmod._finalize_completed()
+    await asyncio.sleep(0)
+
+    assert len(emitted) == 1
+    assert "end_time" not in emitted[0]["data"]["meeting"]
+    assert botmod.finalizing_meetings() == []
+
+
+async def test_finalize_completed_emits_webhook_with_null_start_time(pending, monkeypatch):
+    """A row with no start_time recorded must not raise and must not drop the webhook."""
+    botmod.mark_finalizing(7)
+    monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_URL", "https://example.test/hook")
+    monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_SECRET", "s3cr3t")
+
+    end = datetime(2026, 1, 1, 0, 30, tzinfo=UTC)
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            return {"platform_specific_id": "999", "start_time": None, "end_time": end}
+
+    async def fake_pool():
+        return _FakeCtx(_Conn())
+
+    monkeypatch.setattr(botmod, "ensure_pool", fake_pool)
+
+    emitted = []
+
+    async def fake_emit(url, secret, envelope, **kwargs):
+        emitted.append(envelope)
+        return True
+
+    monkeypatch.setattr(botmod.completion_webhook, "emit", fake_emit)
+
+    await botmod._finalize_completed()
+    await asyncio.sleep(0)
+
+    assert len(emitted) == 1
+    assert emitted[0]["data"]["meeting"]["start_time"] == "2026-01-01T00:30:00Z"
+    assert botmod.finalizing_meetings() == []
+
+
 async def test_finalize_completed_skips_webhook_when_not_configured(pending, monkeypatch):
-    """Default (no COMPLETION_WEBHOOK_URL) — feature off, no task created, no emit call."""
+    """Default (no COMPLETION_WEBHOOK_URL): feature off, no task created, no emit call."""
     assert botmod.COMPLETION_WEBHOOK_URL is None
     botmod.mark_finalizing(7)
 

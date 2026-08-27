@@ -56,7 +56,7 @@ PENDING_DIR = Path(os.environ.get("PENDING_DIR", "/data/pending"))
 DRAIN_IDLE_SLEEP = float(os.environ.get("DRAIN_IDLE_SLEEP", "5"))  # scan interval when queue is empty
 DRAIN_BACKOFF = float(os.environ.get("DRAIN_BACKOFF", "10"))  # pause after a failed transcribe attempt
 
-# Vexa's own `meeting.completed` webhook never fires for these meetings — we write straight
+# Vexa's own `meeting.completed` webhook never fires for these meetings, since we write straight
 # to Postgres, bypassing the code path that fires it. When set, emit the same webhook.v1
 # envelope (see completion_webhook.py) so a receiver (e.g. obsidian-vexa-bridge) can react to
 # the event instead of polling. Unset URL = feature off; the secret is required once the URL
@@ -310,8 +310,9 @@ def _completion_envelope_for_row(meeting_id: int, row: Any) -> dict[str, Any]:
 
 
 async def _emit_completion_webhook(meeting_id: int, envelope: dict[str, Any]) -> None:
-    assert COMPLETION_WEBHOOK_URL is not None
-    assert COMPLETION_WEBHOOK_SECRET is not None
+    if not COMPLETION_WEBHOOK_URL or not COMPLETION_WEBHOOK_SECRET:
+        print(f"meeting {meeting_id} completion webhook skipped: URL/secret not configured", flush=True)
+        return
     ok = await completion_webhook.emit(COMPLETION_WEBHOOK_URL, COMPLETION_WEBHOOK_SECRET, envelope)
     outcome = "delivered" if ok else "failed after retries"
     print(f"meeting {meeting_id} completion webhook {outcome}", flush=True)
@@ -339,13 +340,19 @@ async def _finalize_completed() -> None:
         (PENDING_DIR / "finalizing" / str(meeting_id)).unlink(missing_ok=True)
         print(f"meeting {meeting_id} completed (pending queue drained)", flush=True)
         if COMPLETION_WEBHOOK_URL and row is not None:
-            envelope = _completion_envelope_for_row(meeting_id, row)
-            # Fire-and-forget: the drainer must not block on the receiver's network. Tracked
-            # in _webhook_tasks so the task isn't garbage-collected mid-flight (asyncio only
-            # holds a weak reference to a task once nothing else references it).
-            webhook_task = asyncio.create_task(_emit_completion_webhook(meeting_id, envelope))
-            _webhook_tasks.add(webhook_task)
-            webhook_task.add_done_callback(_webhook_tasks.discard)
+            # The meeting is already marked completed and the finalizing marker already
+            # removed above, so nothing here may affect finalization: a bad row or a broken
+            # envelope build must only cost the webhook, not the meeting.
+            try:
+                envelope = _completion_envelope_for_row(meeting_id, row)
+                # Fire-and-forget: the drainer must not block on the receiver's network. Tracked
+                # in _webhook_tasks so the task isn't garbage-collected mid-flight (asyncio only
+                # holds a weak reference to a task once nothing else references it).
+                webhook_task = asyncio.create_task(_emit_completion_webhook(meeting_id, envelope))
+                _webhook_tasks.add(webhook_task)
+                webhook_task.add_done_callback(_webhook_tasks.discard)
+            except Exception as e:
+                print(f"meeting {meeting_id} completion webhook not scheduled: {e}", flush=True)
 
 
 async def drain_once() -> str:
