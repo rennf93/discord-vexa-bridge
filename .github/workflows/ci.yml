@@ -49,4 +49,4 @@ jobs:
         run: docker build -t discord-vexa-bridge:ci .
       - name: Smoke test (Python 3.11 + audioop + deps import inside the image)
         run: |
-          docker run --rm discord-vexa-bridge:ci python -c "import sys; assert sys.version_info[:2] == (3, 11), sys.version; import audioop, discord, dave, asyncpg, aiohttp, nacl; import dave_voice.voice_client; print('image OK', sys.version)"
+          docker run --rm discord-vexa-bridge:ci python -c "import sys; assert sys.version_info[:2] == (3, 11), sys.version; import audioop, discord, dave, asyncpg, aiohttp, nacl; import dave_voice.voice_client, completion_webhook; print('image OK', sys.version)"
