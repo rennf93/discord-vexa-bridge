@@ -6,29 +6,13 @@
 [![Docs](https://img.shields.io/badge/docs-mkdocs%20material-blue.svg)](https://rennf93.github.io/discord-vexa-bridge/)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 
-Bring **Discord voice calls into [Vexa](https://github.com/Vexa-ai/vexa)** as transcripts —
-speaker-tagged, per user, alongside your Zoom/Meet meetings, and readable by your AI agents over Vexa's MCP server.
+Bring **Discord voice calls into [Vexa](https://github.com/Vexa-ai/vexa)** as transcripts — speaker-tagged, per user, alongside your Zoom/Meet meetings, and readable by your AI agents over Vexa's MCP server.
 
-A small bot joins a Discord voice channel, receives **each speaker as a separate audio stream**
-(native diarization — no clustering), transcribes every utterance on the Whisper worker Vexa
-already runs, and writes the rows straight into Vexa's Postgres. On the dashboard / API / MCP, a
-Discord call then looks just like any other meeting.
+A small bot joins a Discord voice channel, receives **each speaker as a separate audio stream** (native diarization — no clustering), transcribes every utterance on the Whisper worker Vexa already runs, and writes the rows straight into Vexa's Postgres. On the dashboard / API / MCP, a Discord call then looks just like any other meeting.
 
-> **The hard part — and why this exists:** since March 2026, Discord enforces **E2EE on all voice
-> via the DAVE protocol**. Off-the-shelf Python/JS voice libraries can't decrypt it
-> ([py-cord #3139](https://github.com/Pycord-Development/pycord/issues/3139),
-> [discord.js voice](https://github.com/discordjs/discord.js/issues/11419)). This bridge implements
-> the DAVE **receive** path — the voice-gateway handshake, the MLS group join, and per-sender frame
-> decryption (via [`dave.py`](https://pypi.org/project/dave.py/), the libdave binding) — so per-user
-> capture works **today**.
+> **The hard part — and why this exists:** since March 2026, Discord enforces **E2EE on all voice via the DAVE protocol**. Off-the-shelf Python/JS voice libraries can't decrypt it ([py-cord #3139](https://github.com/Pycord-Development/pycord/issues/3139), [discord.js voice](https://github.com/discordjs/discord.js/issues/11419)). This bridge implements the DAVE **receive** path — the voice-gateway handshake, the MLS group join, and per-sender frame decryption (via [`dave.py`](https://pypi.org/project/dave.py/), the libdave binding) — so per-user capture works **today**.
 
-> **Which Vexa version?** Bridge **0.6.0+** runs against **Vexa 0.10.x and 0.12.x** (verified on
-> v0.12.15). Vexa 0.12's read API serves `discord` rows fine; only its *bot* endpoints reject the
-> platform, and this bridge writes directly to Postgres, bypassing them. On 0.12.x you must raise
-> `RECONCILE_ACTIVE_GRACE_S` on meeting-api and keep the transcription unit token-open — see
-> [Which Vexa version?](docs/usage/vexa-version-targeting.md) for the full version map and the
-> 0.12 deployment notes. The schema is still Vexa-internal; the sealed external-ingest contract
-> remains tracked in [Vexa #463](https://github.com/Vexa-ai/vexa/issues/463).
+> **Which Vexa version?** Bridge **0.6.0+** runs against **Vexa 0.10.x and 0.12.x** (verified on v0.12.15). Vexa 0.12's read API serves `discord` rows fine; only its *bot* endpoints reject the platform, and this bridge writes directly to Postgres, bypassing them. On 0.12.x you must raise `RECONCILE_ACTIVE_GRACE_S` on meeting-api and keep the transcription unit token-open — see [Which Vexa version?](docs/usage/vexa-version-targeting.md) for the full version map and the 0.12 deployment notes. The schema is still Vexa-internal; the sealed external-ingest contract remains tracked in [Vexa #463](https://github.com/Vexa-ai/vexa/issues/463).
 
 ---
 
@@ -45,27 +29,16 @@ Discord voice (DAVE/E2EE)
   -> INSERT into meetings / meeting_sessions / transcriptions  (platform = "discord")
 ```
 
-The downstream is exactly what Vexa's own Zoom/Meet bots use, so Discord calls appear in the
-dashboard, the REST API, and the MCP server without special handling — **provided Vexa knows the
-`discord` platform** (see [Step 2](#step-2---teach-vexa-the-discord-platform)).
+The downstream is exactly what Vexa's own Zoom/Meet bots use, so Discord calls appear in the dashboard, the REST API, and the MCP server without special handling — **provided Vexa knows the `discord` platform** (see [Step 2](#step-2---teach-vexa-the-discord-platform)).
 
 ---
 
 ## Who runs this, and where your token lives
 
-**This is self-hosted, bring-your-own-bot software. There is no hosted service and no shared
-bot.** Anyone who wants Discord → Vexa transcripts — the maintainer included — runs **their own
-copy** of this bridge next to **their own Vexa stack**, using **their own Discord bot**. Read
-this before you worry about your token: it never leaves your own infrastructure.
+**This is self-hosted, bring-your-own-bot software. There is no hosted service and no shared bot.** Anyone who wants Discord → Vexa transcripts — the maintainer included — runs **their own copy** of this bridge next to **their own Vexa stack**, using **their own Discord bot**. Read this before you worry about your token: it never leaves your own infrastructure.
 
-- **You create your own Discord bot and use its token.** There is no "add our bot to your
-  server" invite link to click. Each operator makes a bot in the
-  [Discord Developer Portal](https://discord.com/developers/applications)
-  ([Step 1](#step-1---create-the-discord-bot)); the token it gives you is yours alone.
-- **Your token is runtime configuration — it is never baked into the image and never lives in
-  this repo.** You put it in a gitignored `.env` on your own server, Docker Compose passes it to
-  the container as an environment variable, and `bot.py` reads it from
-  `os.environ["DISCORD_TOKEN"]` at startup. The whole lifecycle stays on your machine:
+- **You create your own Discord bot and use its token.** There is no "add our bot to your server" invite link to click. Each operator makes a bot in the [Discord Developer Portal](https://discord.com/developers/applications) ([Step 1](#step-1---create-the-discord-bot)); the token it gives you is yours alone.
+- **Your token is runtime configuration — it is never baked into the image and never lives in this repo.** You put it in a gitignored `.env` on your own server, Docker Compose passes it to the container as an environment variable, and `bot.py` reads it from `os.environ["DISCORD_TOKEN"]` at startup. The whole lifecycle stays on your machine:
 
   ```
   Discord Developer Portal
@@ -74,20 +47,11 @@ this before you worry about your token: it never leaves your own infrastructure.
     -> os.environ["DISCORD_TOKEN"]   (read at runtime, inside your container)
   ```
 
-- **The published images contain zero secrets.** `ghcr.io/rennf93/discord-vexa-bridge` and
-  `docker.io/renzof93/discord-vexa-bridge` are generic binaries — they are safe to be public
-  precisely *because* the bot token and the database password are supplied per-deployment at
-  runtime, not built in.
-- **Nobody handles anyone else's token.** Your token (and your DB password) are never sent to the
-  maintainer or any third party. At runtime the bot talks only to Discord, to **your** Vexa
-  Postgres, and to **your** Vexa Whisper worker — nothing else.
-- **One bot = one identity = one Vexa.** This bridge is single-bot / single-Vexa by design.
-  Offering it as a shared, multi-server hosted product would be a different (multi-tenant)
-  architecture and is **not** what this repo does.
+- **The published images contain zero secrets.** `ghcr.io/rennf93/discord-vexa-bridge` and `docker.io/renzof93/discord-vexa-bridge` are generic binaries — they are safe to be public precisely *because* the bot token and the database password are supplied per-deployment at runtime, not built in.
+- **Nobody handles anyone else's token.** Your token (and your DB password) are never sent to the maintainer or any third party. At runtime the bot talks only to Discord, to **your** Vexa Postgres, and to **your** Vexa Whisper worker — nothing else.
+- **One bot = one identity = one Vexa.** This bridge is single-bot / single-Vexa by design. Offering it as a shared, multi-server hosted product would be a different (multi-tenant) architecture and is **not** what this repo does.
 
-> **The maintainer is just "operator #1."** To run the bot on their own servers, the maintainer
-> follows the exact same [Quick start](#quick-start) below with their own bot token. There is no
-> privileged, central, or hosted instance — everyone self-hosts identically.
+> **The maintainer is just "operator #1."** To run the bot on their own servers, the maintainer follows the exact same [Quick start](#quick-start) below with their own bot token. There is no privileged, central, or hosted instance — everyone self-hosts identically.
 
 ---
 
@@ -117,19 +81,13 @@ this before you worry about your token: it never leaves your own infrastructure.
 
 ### Step 2 - Teach Vexa the `discord` platform
 
-Vexa validates the meeting platform against a fixed enum (`google_meet`, `zoom`, `teams`,
-`browser_session`). Until `discord` is in it, Vexa's read API returns **422** for Discord
-transcripts (the data is written fine, but the dashboard/MCP won't serve it).
+Vexa validates the meeting platform against a fixed enum (`google_meet`, `zoom`, `teams`, `browser_session`). Until `discord` is in it, Vexa's read API returns **422** for Discord transcripts (the data is written fine, but the dashboard/MCP won't serve it).
 
-Add `DISCORD = "discord"` to `Platform` in `services/meeting-api/meeting_api/schemas.py` and rebuild
-your `meeting-api` + `api-gateway` images. A ready-made change (enum + URL handling + concurrency
-exclusion + dashboard icon) is here: **[the `discord` platform patch](https://github.com/rennf93/vexa/tree/add-discord-platform)** -
-ideally land it upstream so future Vexa releases include it.
+Add `DISCORD = "discord"` to `Platform` in `services/meeting-api/meeting_api/schemas.py` and rebuild your `meeting-api` + `api-gateway` images. A ready-made change (enum + URL handling + concurrency exclusion + dashboard icon) is here: **[the `discord` platform patch](https://github.com/rennf93/vexa/tree/add-discord-platform)** - ideally land it upstream so future Vexa releases include it.
 
 ### Step 3 - Deploy the bridge
 
-Add this service to your Vexa `docker-compose.yaml` (same network as `postgres` and
-`transcription-worker`). See [`compose-snippet.yml`](compose-snippet.yml):
+Add this service to your Vexa `docker-compose.yaml` (same network as `postgres` and `transcription-worker`). See [`compose-snippet.yml`](compose-snippet.yml):
 
 ```yaml
   discord-vexa-bridge:
@@ -152,8 +110,7 @@ docker compose up -d discord-vexa-bridge
 
 ### Step 4 - Use it
 
-In Discord: **`/join`** (joins your current voice channel and starts transcribing) and **`/leave`**
-(stops and finalizes the meeting). Transcripts appear in your Vexa dashboard / API / MCP.
+In Discord: **`/join`** (joins your current voice channel and starts transcribing) and **`/leave`** (stops and finalizes the meeting). Transcripts appear in your Vexa dashboard / API / MCP.
 
 ---
 
@@ -168,6 +125,14 @@ In Discord: **`/join`** (joins your current voice channel and starts transcribin
 | `LANGUAGE` | no | `""` (autodetect) | Force a transcription language code (e.g. `en`, `es`). |
 | `SILENCE_MS` | no | `800` | Silence gap (ms) that ends an utterance. |
 | `MIN_UTTERANCE_MS` | no | `400` | Drop utterances shorter than this. |
+| `COMPLETION_WEBHOOK_URL` | no | unset (feature off) | Receiver URL to POST a `meeting.completed` webhook to once a meeting's pending queue drains and its row flips to `completed`. |
+| `COMPLETION_WEBHOOK_SECRET` | required if `COMPLETION_WEBHOOK_URL` is set | - | HMAC secret used to sign the webhook body; the bridge fails fast at startup if the URL is set without it. |
+
+---
+
+## Completion webhook
+
+Vexa's own `meeting.completed` webhook never fires for Discord meetings — this bridge writes them straight into Vexa's Postgres, bypassing the code path that would fire it. Set `COMPLETION_WEBHOOK_URL` (and `COMPLETION_WEBHOOK_SECRET`) to have the bridge emit the same `webhook.v1` envelope Vexa itself emits, signed the same way, once a meeting is marked `completed` (its pending transcription queue has fully drained — see `_finalize_completed` in `bot.py`). The request is `POST` `Content-Type: application/json` with `X-Webhook-Timestamp`, `X-Webhook-Signature: sha256=<hmac_sha256(secret, timestamp + "." + raw_body)>`, and `Authorization: Bearer <secret>` headers; delivery is fire-and-forget (it never blocks the drainer) and retries a few times on failure before giving up. `event_id` is deterministic per meeting (`evt_<sha256(...)[:32]>`), so a redelivered event dedups on the receiving end. [`obsidian-vexa-bridge`](https://github.com/rennf93/obsidian-vexa-bridge) is the reference receiver: it accepts this exact envelope and processes the meeting on the event instead of polling Vexa's API.
 
 ---
 
@@ -191,22 +156,17 @@ make fix                # auto-fix
 make build              # build the Docker image
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The voice-receive internals live in `dave_voice/`; `bot.py`
-is the control plane (slash commands + the transcription/DB pipeline).
+See [CONTRIBUTING.md](CONTRIBUTING.md). The voice-receive internals live in `dave_voice/`; `bot.py` is the control plane (slash commands + the transcription/DB pipeline).
 
 ## Documentation
 
-Full docs — deployment, configuration, troubleshooting, and the DAVE receive
-architecture — are at **<https://rennf93.github.io/discord-vexa-bridge/>**.
+Full docs — deployment, configuration, troubleshooting, and the DAVE receive architecture — are at **<https://rennf93.github.io/discord-vexa-bridge/>**.
 
 ## License
 
 This project is **dual-licensed**:
 
-- **Open-source use** under the **GNU AGPL-3.0-or-later** ([LICENSE](LICENSE)) — free, with
-  the network-use source-disclosure obligation of AGPL §13.
-- A **commercial license** is available for those who cannot or do not wish to comply with
-  the AGPL (e.g. embedding in a closed SaaS / proprietary product) — see
-  [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
+- **Open-source use** under the **GNU AGPL-3.0-or-later** ([LICENSE](LICENSE)) — free, with the network-use source-disclosure obligation of AGPL §13.
+- A **commercial license** is available for those who cannot or do not wish to comply with the AGPL (e.g. embedding in a closed SaaS / proprietary product) — see [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md).
 
 (c) Renzo Franceschini. Not affiliated with Discord or Vexa.

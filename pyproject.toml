@@ -1,6 +1,6 @@
 [project]
 name = "discord-vexa-bridge"
-version = "0.6.0"
+version = "0.7.0"
 description = "Bridge Discord voice (DAVE/E2EE) into Vexa: per-user transcription written straight to Vexa's Postgres."
 readme = "README.md"
 license = "AGPL-3.0-or-later"
