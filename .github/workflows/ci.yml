@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'bot.py'
+      - 'completion_webhook.py'
       - 'dave_voice/**'
       - 'tests/**'
       - 'pyproject.toml'

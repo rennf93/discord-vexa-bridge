@@ -13,6 +13,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://u:p@h:5432/db")
 os.environ.setdefault("VEXA_USER_ID", "1")
 
 import asyncio  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
 
 import pytest  # noqa: E402
 
@@ -116,6 +117,10 @@ async def test_finalizing_meeting_completes_when_queue_drains(pending, monkeypat
         async def execute(self, sql, *args):
             stmts.append(sql)
 
+        async def fetchrow(self, sql, *args):
+            stmts.append(sql)
+            return {"platform_specific_id": "999", "start_time": None, "end_time": None}
+
     async def fake_pool():
         return _FakeCtx(_Conn())
 
@@ -125,6 +130,68 @@ async def test_finalizing_meeting_completes_when_queue_drains(pending, monkeypat
     assert botmod.scan_pending() == []
     assert any("status='completed'" in s for s in stmts)  # meeting flipped to completed
     assert botmod.finalizing_meetings() == []  # marker removed
+
+
+async def test_finalize_completed_emits_webhook_when_configured(pending, monkeypatch):
+    """_finalize_completed fires the webhook (as a tracked background task) once configured."""
+    botmod.mark_finalizing(7)  # queue already drained — nothing spilled for meeting 7
+    monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_URL", "https://example.test/hook")
+    monkeypatch.setattr(botmod, "COMPLETION_WEBHOOK_SECRET", "s3cr3t")
+
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = datetime(2026, 1, 1, 0, 30, tzinfo=UTC)
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            return {"platform_specific_id": "999", "start_time": start, "end_time": end}
+
+    async def fake_pool():
+        return _FakeCtx(_Conn())
+
+    monkeypatch.setattr(botmod, "ensure_pool", fake_pool)
+
+    emitted = []
+
+    async def fake_emit(url, secret, envelope, **kwargs):
+        emitted.append((url, secret, envelope))
+        return True
+
+    monkeypatch.setattr(botmod.completion_webhook, "emit", fake_emit)
+
+    await botmod._finalize_completed()
+    await asyncio.sleep(0)  # let the fire-and-forget task run
+
+    assert len(emitted) == 1
+    url, secret, envelope = emitted[0]
+    assert url == "https://example.test/hook"
+    assert secret == "s3cr3t"
+    assert envelope["data"]["meeting"]["id"] == 7
+    assert envelope["data"]["meeting"]["native_meeting_id"] == "999"
+    assert botmod.finalizing_meetings() == []
+
+
+async def test_finalize_completed_skips_webhook_when_not_configured(pending, monkeypatch):
+    """Default (no COMPLETION_WEBHOOK_URL) — feature off, no task created, no emit call."""
+    assert botmod.COMPLETION_WEBHOOK_URL is None
+    botmod.mark_finalizing(7)
+
+    class _Conn:
+        async def fetchrow(self, sql, *args):
+            return {"platform_specific_id": "999", "start_time": None, "end_time": None}
+
+    async def fake_pool():
+        return _FakeCtx(_Conn())
+
+    monkeypatch.setattr(botmod, "ensure_pool", fake_pool)
+
+    called = []
+    monkeypatch.setattr(botmod.completion_webhook, "emit", lambda *a, **k: called.append(1))
+
+    await botmod._finalize_completed()
+    await asyncio.sleep(0)
+
+    assert called == []
+    assert botmod.finalizing_meetings() == []
 
 
 async def test_finalizing_not_completed_while_queue_has_segments(pending, monkeypatch):
