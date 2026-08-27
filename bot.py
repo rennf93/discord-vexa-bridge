@@ -31,6 +31,7 @@ import aiohttp
 import asyncpg
 import discord
 
+import completion_webhook
 from dave_voice.discord_protocol import DAVEVoiceProtocol
 from dave_voice.voice_client import DAVEVoiceClient
 
@@ -54,6 +55,16 @@ TRANSCRIBE_TIMEOUT = float(os.environ.get("TRANSCRIBE_TIMEOUT", "600"))  # the w
 PENDING_DIR = Path(os.environ.get("PENDING_DIR", "/data/pending"))
 DRAIN_IDLE_SLEEP = float(os.environ.get("DRAIN_IDLE_SLEEP", "5"))  # scan interval when queue is empty
 DRAIN_BACKOFF = float(os.environ.get("DRAIN_BACKOFF", "10"))  # pause after a failed transcribe attempt
+
+# Vexa's own `meeting.completed` webhook never fires for these meetings — we write straight
+# to Postgres, bypassing the code path that fires it. When set, emit the same webhook.v1
+# envelope (see completion_webhook.py) so a receiver (e.g. obsidian-vexa-bridge) can react to
+# the event instead of polling. Unset URL = feature off; the secret is required once the URL
+# is set, so a misconfigured deployment fails fast at startup instead of silently not signing.
+COMPLETION_WEBHOOK_URL = os.environ.get("COMPLETION_WEBHOOK_URL", "").strip() or None
+COMPLETION_WEBHOOK_SECRET = os.environ.get("COMPLETION_WEBHOOK_SECRET", "").strip() or None
+if COMPLETION_WEBHOOK_URL and not COMPLETION_WEBHOOK_SECRET:
+    raise RuntimeError("COMPLETION_WEBHOOK_SECRET is required when COMPLETION_WEBHOOK_URL is set")
 
 # Pycord decodes Opus to 48 kHz, 16-bit, stereo PCM in the sink.
 SR, CH, SW = 48_000, 2, 2
@@ -285,6 +296,27 @@ async def insert_transcription(meta: dict[str, Any], text: str) -> None:
         )
 
 
+_webhook_tasks: set[asyncio.Task[None]] = set()
+
+
+def _completion_envelope_for_row(meeting_id: int, row: Any) -> dict[str, Any]:
+    """Build the meeting.completed envelope from the row `_finalize_completed` just updated."""
+    return completion_webhook.build_envelope(
+        meeting_id,
+        row["platform_specific_id"],
+        row["start_time"],
+        row["end_time"],
+    )
+
+
+async def _emit_completion_webhook(meeting_id: int, envelope: dict[str, Any]) -> None:
+    assert COMPLETION_WEBHOOK_URL is not None
+    assert COMPLETION_WEBHOOK_SECRET is not None
+    ok = await completion_webhook.emit(COMPLETION_WEBHOOK_URL, COMPLETION_WEBHOOK_SECRET, envelope)
+    outcome = "delivered" if ok else "failed after retries"
+    print(f"meeting {meeting_id} completion webhook {outcome}", flush=True)
+
+
 async def _finalize_completed() -> None:
     """Mark any finalizing meetings whose pending queue is empty as 'completed'.
 
@@ -299,12 +331,21 @@ async def _finalize_completed() -> None:
         if str(meeting_id) in pending_prefixes:
             continue
         async with (await ensure_pool()).acquire() as c:
-            await c.execute(
-                "UPDATE meetings SET status='completed', end_time=now(), updated_at=now() WHERE id=$1",
+            row = await c.fetchrow(
+                "UPDATE meetings SET status='completed', end_time=now(), updated_at=now()"
+                " WHERE id=$1 RETURNING platform_specific_id, start_time, end_time",
                 meeting_id,
             )
         (PENDING_DIR / "finalizing" / str(meeting_id)).unlink(missing_ok=True)
         print(f"meeting {meeting_id} completed (pending queue drained)", flush=True)
+        if COMPLETION_WEBHOOK_URL and row is not None:
+            envelope = _completion_envelope_for_row(meeting_id, row)
+            # Fire-and-forget: the drainer must not block on the receiver's network. Tracked
+            # in _webhook_tasks so the task isn't garbage-collected mid-flight (asyncio only
+            # holds a weak reference to a task once nothing else references it).
+            webhook_task = asyncio.create_task(_emit_completion_webhook(meeting_id, envelope))
+            _webhook_tasks.add(webhook_task)
+            webhook_task.add_done_callback(_webhook_tasks.discard)
 
 
 async def drain_once() -> str:
