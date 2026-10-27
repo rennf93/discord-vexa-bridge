@@ -65,3 +65,8 @@ bandit) and the pytest suite on Python 3.11. Keep all of these green.
 - Never commit secrets. `DISCORD_TOKEN`, `DATABASE_URL`, and `.env` are runtime config and are
   gitignored.
 - DAVE is a moving target; protocol bumps may require updating the decrypt path / `dave.py`.
+
+<!-- entire-agent:begin -->
+Read .entire/agent-guide.md for this repository's workflow, source inspection, and verification guidance.
+@.entire/agent-guide.md
+<!-- entire-agent:end -->
